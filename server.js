@@ -114,7 +114,5 @@ app.use(errorHandler);
 const PORT = process.env.PORT || 5000;
 
 app.listen(PORT, () => {
-  console.log(
-    `[Jayroop Server] Running on http://localhost:${PORT} in ${process.env.NODE_ENV || "development"} mode`,
-  );
+  console.log(`Jayroop Server running on port ${PORT}`);
 });
