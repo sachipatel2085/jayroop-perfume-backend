@@ -20,9 +20,15 @@ import reviewRoutes from "./src/routes/reviewRoutes.js";
 import blogRoutes from "./src/routes/blogRoutes.js";
 import advertisementRoutes from "./src/routes/advertisementRoutes.js";
 import adminRoutes from "./src/routes/adminRoutes.js";
+import uploadRoutes from "./src/routes/uploadRoutes.js";
+import path from "path";
+import { fileURLToPath } from "url";
 
 // Load environment variables
 dotenv.config();
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // Connect to MongoDB
 connectDB();
@@ -93,6 +99,11 @@ app.use("/api/v1/reviews", reviewRoutes);
 app.use("/api/v1/blogs", blogRoutes);
 app.use("/api/v1/advertisements", advertisementRoutes);
 app.use("/api/v1/admin", adminRoutes);
+app.use("/api/v1/upload", uploadRoutes);
+
+// Static uploads serving (development fallback)
+app.use("/uploads", express.static(path.join(__dirname, "public/uploads")));
+
 app.get("/", (req, res) => {
   res.status(200).json({
     success: true,
