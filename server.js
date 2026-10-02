@@ -4,7 +4,7 @@ import cors from "cors";
 import helmet from "helmet";
 import morgan from "morgan";
 import mongoSanitize from "express-mongo-sanitize";
-import { connectDB } from "../backend/src/config/db.js";
+import { connectDB } from "./src/config/db.js";
 import { apiLimiter } from "./src/middleware/rateLimiter.js";
 import { notFound, errorHandler } from "./src/middleware/errorMiddleware.js";
 
