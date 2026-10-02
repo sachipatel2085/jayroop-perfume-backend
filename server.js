@@ -93,6 +93,19 @@ app.use("/api/v1/reviews", reviewRoutes);
 app.use("/api/v1/blogs", blogRoutes);
 app.use("/api/v1/advertisements", advertisementRoutes);
 app.use("/api/v1/admin", adminRoutes);
+app.get("/", (req, res) => {
+  res.status(200).json({
+    success: true,
+    message: "Jayroop Perfume API is running",
+  });
+});
+
+app.get("/health", (req, res) => {
+  res.status(200).json({
+    success: true,
+    message: "Server is healthy",
+  });
+});
 
 // Error Handling Middleware
 app.use(notFound);
