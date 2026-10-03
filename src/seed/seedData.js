@@ -417,21 +417,73 @@ const seedDatabase = async () => {
       averageRating: 4.7,
       numReviews: 6,
     });
+    // 6. Royal Flora - Marwad ka Pahla Luxury Perfume
+    const royalFlora = await Product.create({
+      name: 'Royal Flora Eau De Parfum',
+      slug: 'royal-flora-eau-de-parfum',
+      category: perfumesCategory._id,
+      brand: 'Jayrup Luxury Perfume',
+      shortDescription:
+        "Marwad ka Pahla Luxury Perfume. Royal man's first choice in an imperial 50ml flacon.",
+      description: `
+        An imperial olfactory signature distilled with the majestic spirit and royal courts of Marwad. 
+        Royal Flora brings forth citrus blossoms, hand-harvested Kannauj damask roses, and a heart of saffron pistils, settling into a velvet sanctuary of white amber, Mysore sandalwood, and cashmere musk. 
+        Formulated at concentrated Eau De Parfum strength (50 ml | e 1.69 fl.oz) to provide mesmerizing sillage and timeless prestige.
+      `,
+      price: 1999,
+      salePrice: 1499,
+      sku: 'JR-ROYAL-FLORA-50',
+      stock: 45,
+      images: [
+        {
+          url: '/uploads/jayrup-hero-banner.jpg',
+          isPrimary: true,
+        },
+      ],
+      variants: [
+        {
+          title: '50ml (1.69 fl.oz)',
+          sku: 'JR-FLORA-50ML',
+          price: 1999,
+          salePrice: 1499,
+          stock: 45,
+          attributes: { size: '50ml' },
+        },
+      ],
+      specifications: {
+        'Top Notes': 'Citrus Bloom, Sweet Bergamot, Pink Peppercorn',
+        'Heart Notes': 'Kannauj Damask Rose, Royal Jasmine, Saffron Pistils',
+        'Base Notes': 'White Amber, Mysore Sandalwood, Cashmere Musk',
+        'Concentration': 'Eau De Parfum (EDP)',
+        'Volume': '50 ml | e 1.69 fl.oz',
+        'Gender': 'Unisex / Royal Man',
+        'Edition': "Royal Man's First Choice • Marwad ka Pahla Luxury Perfume",
+      },
+      tags: ['Perfume', 'Royal Flora', 'Jayrup', 'Marwad', 'Luxury Perfume', 'EDP'],
+      featured: true,
+      status: 'ACTIVE',
+      averageRating: 5.0,
+      numReviews: 24,
+      seo: {
+        metaTitle: 'Royal Flora Eau De Parfum | Marwad ka Pahla Luxury Perfume',
+        metaDescription:
+          "Buy Royal Flora Eau De Parfum by Jayrup. Marwad's first luxury perfume and the royal man's first choice.",
+      },
+    });
+
     console.log('[Seed] Products created with variants & specifications');
 
-    // 4. Seed Dynamic Advertisement & Promotional Campaign Video
+    // 4. Seed Dynamic Advertisement & Promotional Campaign
     await Advertisement.create({
-      title: 'THE CROWN OF ROYAL LUXURY',
-      subtitle: 'JAYROOP ROYAL FRAGRANCE & SKINCARE HOUSE',
+      title: 'JAYRUP',
+      subtitle: 'LUXURY PERFUME',
       description:
-        'Discover regal extraits crafted with aged Cambodian Oud, Taif Rose, and time-tested Jayroop formulations.',
-      mediaType: 'VIDEO',
-      mediaUrl:
-        'https://assets.mixkit.co/videos/preview/mixkit-perfume-bottle-and-flowers-42617-large.mp4',
-      posterUrl:
-        'https://images.unsplash.com/photo-1547887537-6158d64c35b3?auto=format&fit=crop&q=80&w=1600',
-      ctaText: 'DISCOVER THE COLLECTION',
-      ctaUrl: '/shop',
+        "Marwad ka Pahla Luxury Perfume — Royal man's first choice. Experience the sovereign majesty of Royal Flora Eau De Parfum (50ml).",
+      mediaType: 'IMAGE',
+      mediaUrl: '/uploads/jayrup-hero-banner.jpg',
+      posterUrl: '/uploads/jayrup-hero-banner.jpg',
+      ctaText: 'EXPLORE ROYAL FLORA',
+      ctaUrl: '/products/royal-flora-eau-de-parfum',
       location: 'HOMEPAGE_HERO',
       priority: 10,
       status: 'ACTIVE',
