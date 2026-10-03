@@ -44,7 +44,7 @@ const productSchema = new mongoose.Schema(
     },
     brand: {
       type: String,
-      default: 'Jayroop Special',
+      default: 'Jayrup Special',
       trim: true,
     },
     shortDescription: {

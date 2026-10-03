@@ -75,7 +75,13 @@ export const login = async (req, res, next) => {
       });
     }
 
-    const user = await User.findOne({ email: email.toLowerCase() }).select('+password');
+    const user = await User.findOne({
+      $or: [
+        { email: email.toLowerCase() },
+        { email: email.toLowerCase().replace('@jayrup.com', '@jayroop.com') },
+        { email: email.toLowerCase().replace('@jayroop.com', '@jayrup.com') },
+      ],
+    }).select('+password');
     if (!user) {
       return res.status(401).json({
         success: false,

@@ -83,7 +83,7 @@ app.get("/api/v1/health", (req, res) => {
   res.status(200).json({
     status: "healthy",
     timestamp: new Date().toISOString(),
-    service: "Jayroop (JR) Luxury Fragrance & Cosmetics API",
+    service: "Jayrup (JR) Luxury Fragrance & Cosmetics API",
     version: "1.0.0",
   });
 });
@@ -109,7 +109,7 @@ app.use("/uploads", express.static(path.join(__dirname, "public/uploads")));
 app.get("/", (req, res) => {
   res.status(200).json({
     success: true,
-    message: "Jayroop Perfume API is running",
+    message: "Jayrup Perfume API is running",
   });
 });
 app.get("/favicon.ico", (req, res) => {
@@ -130,5 +130,5 @@ app.use(errorHandler);
 const PORT = process.env.PORT || 5000;
 
 app.listen(PORT, () => {
-  console.log(`Jayroop Server running on port ${PORT}`);
+  console.log(`Jayrup Server running on port ${PORT}`);
 });

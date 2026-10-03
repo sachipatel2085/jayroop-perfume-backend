@@ -32,7 +32,7 @@ const blogSchema = new mongoose.Schema(
     },
     author: {
       type: String,
-      default: 'Jayroop Editorial House',
+      default: 'Jayrup Editorial House',
     },
     category: {
       type: String,
