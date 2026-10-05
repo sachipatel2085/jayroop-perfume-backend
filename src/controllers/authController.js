@@ -250,9 +250,19 @@ export const deleteAddress = async (req, res, next) => {
 export const toggleWishlist = async (req, res, next) => {
   try {
     const { productId } = req.body;
-    const user = await User.findById(req.user._id);
+    if (!productId) {
+      return res.status(400).json({ success: false, message: 'Product ID is required' });
+    }
 
-    const index = user.wishlist.indexOf(productId);
+    const user = await User.findById(req.user._id);
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+
+    const targetIdStr = productId.toString();
+    const index = user.wishlist.findIndex(
+      (item) => (item?._id ? item._id.toString() : item?.toString()) === targetIdStr
+    );
     let action = 'added';
 
     if (index > -1) {
@@ -264,6 +274,7 @@ export const toggleWishlist = async (req, res, next) => {
     }
 
     await user.save();
+    await user.populate('wishlist', 'name slug price salePrice images averageRating stock brand category');
 
     res.status(200).json({
       success: true,

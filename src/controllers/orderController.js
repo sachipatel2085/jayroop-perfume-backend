@@ -122,7 +122,7 @@ export const getAllOrders = async (req, res, next) => {
 // @access  Private/Admin
 export const updateOrderStatus = async (req, res, next) => {
   try {
-    const { status, note } = req.body;
+    const { status, note, paymentStatus } = req.body;
     const order = await Order.findById(req.params.id);
 
     if (!order) {
@@ -152,6 +152,13 @@ export const updateOrderStatus = async (req, res, next) => {
 
     const oldStatus = order.orderStatus;
     order.orderStatus = status;
+
+    if (paymentStatus && ['PENDING', 'PAID', 'FAILED', 'REFUNDED'].includes(paymentStatus)) {
+      order.paymentStatus = paymentStatus;
+    } else if (status === 'DELIVERED' && order.paymentMethod === 'COD') {
+      // Auto-mark COD as PAID upon successful delivery
+      order.paymentStatus = 'PAID';
+    }
 
     if (status === 'DELIVERED') {
       order.deliveredAt = new Date();

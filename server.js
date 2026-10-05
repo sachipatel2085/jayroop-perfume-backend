@@ -22,6 +22,7 @@ import advertisementRoutes from "./src/routes/advertisementRoutes.js";
 import adminRoutes from "./src/routes/adminRoutes.js";
 import uploadRoutes from "./src/routes/uploadRoutes.js";
 import influencerRoutes from "./src/routes/influencerRoutes.js";
+import settingRoutes from "./src/routes/settingRoutes.js";
 import path from "path";
 import { fileURLToPath } from "url";
 
@@ -102,6 +103,7 @@ app.use("/api/v1/advertisements", advertisementRoutes);
 app.use("/api/v1/admin", adminRoutes);
 app.use("/api/v1/upload", uploadRoutes);
 app.use("/api/v1/influencers", influencerRoutes);
+app.use("/api/v1/settings", settingRoutes);
 
 // Static uploads serving (development fallback)
 app.use("/uploads", express.static(path.join(__dirname, "public/uploads")));

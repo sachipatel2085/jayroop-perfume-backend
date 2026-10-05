@@ -3,6 +3,7 @@ import { getRazorpayInstance, verifyRazorpaySignature, verifyWebhookSignature } 
 import { Order } from '../models/Order.js';
 import { Product } from '../models/Product.js';
 import { Coupon } from '../models/Coupon.js';
+import { Setting } from '../models/Setting.js';
 
 // Helper to generate unique luxury order number
 const generateOrderNumber = () => {
@@ -330,6 +331,198 @@ export const handleWebhook = async (req, res, next) => {
     }
 
     res.status(200).json({ status: 'ok' });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Create Cash on Delivery (COD) Order
+// @route   POST /api/v1/payments/create-cod-order
+// @access  Private
+export const createCodOrder = async (req, res, next) => {
+  try {
+    const { items, shippingAddress, couponCode } = req.body;
+
+    // 1. Verify Store Setting: Is COD enabled by admin?
+    const settings = await Setting.getStoreSettings();
+    if (!settings.codEnabled) {
+      return res.status(400).json({
+        success: false,
+        message: 'Cash on Delivery is currently unavailable. Please choose secure online payment.',
+      });
+    }
+
+    if (!items || !Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'No items provided for order checkout',
+      });
+    }
+
+    if (!shippingAddress || !shippingAddress.fullName || !shippingAddress.addressLine1 || !shippingAddress.phone) {
+      return res.status(400).json({
+        success: false,
+        message: 'Complete shipping address is required',
+      });
+    }
+
+    // 2. Recalculate everything server-side from DB
+    const orderItemsSnapshot = [];
+    let subtotal = 0;
+
+    for (const item of items) {
+      const product = await Product.findById(item.productId);
+      if (!product || product.status !== 'ACTIVE') {
+        return res.status(400).json({
+          success: false,
+          message: `Product '${item.name || item.productId}' is unavailable.`,
+        });
+      }
+
+      let price = product.salePrice || product.price;
+      let variantSnapshot = null;
+      let availableStock = product.stock;
+
+      if (item.variantSku && product.variants && product.variants.length > 0) {
+        const variant = product.variants.find((v) => v.sku === item.variantSku);
+        if (variant) {
+          price = variant.salePrice || variant.price;
+          availableStock = variant.stock;
+          variantSnapshot = {
+            title: variant.title,
+            sku: variant.sku,
+            attributes: variant.attributes,
+          };
+        }
+      }
+
+      const qty = Math.max(1, Number(item.quantity) || 1);
+      if (availableStock < qty) {
+        return res.status(400).json({
+          success: false,
+          message: `Insufficient inventory for '${product.name}' (${variantSnapshot ? variantSnapshot.title : 'Standard'}). Only ${availableStock} available.`,
+        });
+      }
+
+      const itemTotal = price * qty;
+      subtotal += itemTotal;
+
+      orderItemsSnapshot.push({
+        product: product._id,
+        name: product.name,
+        slug: product.slug,
+        image: product.images?.[0]?.url || '',
+        variant: variantSnapshot,
+        price,
+        quantity: qty,
+        subtotal: itemTotal,
+      });
+    }
+
+    // 3. Min/Max order amount validation for COD
+    if (settings.codMinOrderAmount > 0 && subtotal < settings.codMinOrderAmount) {
+      return res.status(400).json({
+        success: false,
+        message: `Minimum order amount for Cash on Delivery is ₹${settings.codMinOrderAmount}.`,
+      });
+    }
+
+    if (settings.codMaxOrderAmount > 0 && subtotal > settings.codMaxOrderAmount) {
+      return res.status(400).json({
+        success: false,
+        message: `Maximum order amount for Cash on Delivery is ₹${settings.codMaxOrderAmount}. Please choose online payment for larger orders.`,
+      });
+    }
+
+    // 4. Validate coupon server-side
+    let discount = 0;
+    let appliedCoupon = null;
+
+    if (couponCode && couponCode.trim()) {
+      const coupon = await Coupon.findOne({
+        code: couponCode.trim().toUpperCase(),
+      });
+
+      if (coupon) {
+        const check = coupon.isValid(subtotal);
+        if (check.valid) {
+          discount = coupon.calculateDiscount(subtotal);
+          appliedCoupon = {
+            code: coupon.code,
+            discountAmount: discount,
+          };
+        }
+      }
+    }
+
+    // 5. Shipping & COD handling fee logic
+    const shipping = subtotal > 0 && subtotal < 999 ? 100 : 0;
+    const codFee = settings.codExtraFee || 0;
+    const finalTotal = Math.max(0, subtotal - discount + shipping + codFee);
+
+    const orderNumber = generateOrderNumber();
+
+    // 6. Save order in database with COD payment method
+    const newOrder = await Order.create({
+      orderNumber,
+      user: req.user._id,
+      items: orderItemsSnapshot,
+      subtotal,
+      discount,
+      shipping: shipping + codFee,
+      total: finalTotal,
+      appliedCoupon,
+      shippingAddress,
+      paymentMethod: 'COD',
+      paymentStatus: 'PENDING',
+      orderStatus: 'PROCESSING',
+      paymentInfo: {
+        gateway: 'COD',
+      },
+      statusHistory: [
+        {
+          status: 'PROCESSING',
+          timestamp: new Date(),
+          note: `Order placed with Cash on Delivery (COD). Total of ₹${finalTotal} will be collected upon delivery.`,
+          updatedBy: 'CUSTOMER',
+        },
+      ],
+    });
+
+    // 7. Deduct inventory stock for products and variants
+    for (const item of orderItemsSnapshot) {
+      const product = await Product.findById(item.product);
+      if (product) {
+        if (item.variant?.sku && product.variants?.length > 0) {
+          const v = product.variants.find((vr) => vr.sku === item.variant.sku);
+          if (v) {
+            v.stock = Math.max(0, v.stock - item.quantity);
+          }
+        }
+        product.stock = Math.max(0, product.stock - item.quantity);
+        await product.save();
+      }
+    }
+
+    // 8. Increment coupon usage if applied
+    if (appliedCoupon) {
+      await Coupon.findOneAndUpdate(
+        { code: appliedCoupon.code },
+        { $inc: { usedCount: 1 } }
+      );
+    }
+
+    res.status(201).json({
+      success: true,
+      message: 'Cash on Delivery order placed successfully',
+      data: {
+        orderId: newOrder._id,
+        orderNumber: newOrder.orderNumber,
+        total: newOrder.total,
+        paymentMethod: 'COD',
+        paymentStatus: 'PENDING',
+      },
+    });
   } catch (error) {
     next(error);
   }

@@ -88,6 +88,12 @@ const orderSchema = new mongoose.Schema(
       postalCode: { type: String, required: true },
       country: { type: String, default: 'India' },
     },
+    paymentMethod: {
+      type: String,
+      enum: ['ONLINE', 'COD'],
+      default: 'ONLINE',
+      index: true,
+    },
     paymentStatus: {
       type: String,
       enum: ['PENDING', 'PAID', 'FAILED', 'REFUNDED'],

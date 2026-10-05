@@ -8,6 +8,7 @@ import { logAdminAction } from '../utils/auditLogger.js';
 export const getProducts = async (req, res, next) => {
   try {
     const {
+      ids,
       search,
       category,
       subCategory,
@@ -22,6 +23,14 @@ export const getProducts = async (req, res, next) => {
     } = req.query;
 
     const filter = { status: 'ACTIVE' };
+
+    // Filter by specific IDs (e.g. for wishlist or bulk lookup)
+    if (ids) {
+      const idList = ids.split(',').map((id) => id.trim()).filter((id) => id.match(/^[0-9a-fA-F]{24}$/));
+      if (idList.length > 0) {
+        filter._id = { $in: idList };
+      }
+    }
 
     // Search query
     if (search) {
