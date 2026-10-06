@@ -16,6 +16,11 @@ export const getPublicSettings = async (req, res, next) => {
         codMinOrderAmount: settings.codMinOrderAmount || 0,
         codMaxOrderAmount: settings.codMaxOrderAmount || 50000,
         onlinePaymentEnabled: settings.onlinePaymentEnabled !== false,
+        defaultMetaTitle: settings.defaultMetaTitle || 'Jayrup (JR) | Royal Luxury Fragrance & Skincare House',
+        defaultMetaDescription: settings.defaultMetaDescription || '',
+        defaultMetaKeywords: settings.defaultMetaKeywords || '',
+        googleSiteVerification: settings.googleSiteVerification || '',
+        ogDefaultImage: settings.ogDefaultImage || '',
       },
     });
   } catch (error) {
@@ -39,7 +44,7 @@ export const getAdminSettings = async (req, res, next) => {
   }
 };
 
-// @desc    Admin: Update store settings (COD on/off, fees, online payment)
+// @desc    Admin: Update store settings (COD on/off, fees, online payment, SEO)
 // @route   PUT /api/v1/settings
 // @access  Private/Admin
 export const updateSettings = async (req, res, next) => {
@@ -50,6 +55,11 @@ export const updateSettings = async (req, res, next) => {
       codMinOrderAmount,
       codMaxOrderAmount,
       onlinePaymentEnabled,
+      defaultMetaTitle,
+      defaultMetaDescription,
+      defaultMetaKeywords,
+      googleSiteVerification,
+      ogDefaultImage,
     } = req.body;
 
     const settings = await Setting.getStoreSettings();
@@ -61,6 +71,12 @@ export const updateSettings = async (req, res, next) => {
     if (codMinOrderAmount !== undefined) settings.codMinOrderAmount = Math.max(0, Number(codMinOrderAmount) || 0);
     if (codMaxOrderAmount !== undefined) settings.codMaxOrderAmount = Math.max(0, Number(codMaxOrderAmount) || 0);
     if (onlinePaymentEnabled !== undefined) settings.onlinePaymentEnabled = Boolean(onlinePaymentEnabled);
+
+    if (defaultMetaTitle !== undefined) settings.defaultMetaTitle = defaultMetaTitle.trim();
+    if (defaultMetaDescription !== undefined) settings.defaultMetaDescription = defaultMetaDescription.trim();
+    if (defaultMetaKeywords !== undefined) settings.defaultMetaKeywords = defaultMetaKeywords.trim();
+    if (googleSiteVerification !== undefined) settings.googleSiteVerification = googleSiteVerification.trim();
+    if (ogDefaultImage !== undefined) settings.ogDefaultImage = ogDefaultImage.trim();
 
     await settings.save();
 

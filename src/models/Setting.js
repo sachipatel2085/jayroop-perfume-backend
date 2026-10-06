@@ -33,6 +33,32 @@ const settingSchema = new mongoose.Schema(
       type: Boolean,
       default: true,
     },
+    // Global Storefront SEO & Webmaster Defaults
+    defaultMetaTitle: {
+      type: String,
+      default: 'Jayrup (JR) | Royal Luxury Fragrance & Skincare House',
+      trim: true,
+    },
+    defaultMetaDescription: {
+      type: String,
+      default: 'Jayrup (जयरूप) - Royal Indian Luxury House of High-Potency Extraits de Parfum and Ayurvedic Skincare. पिंपल्स भागे, आत्मविश्वास जागे.',
+      trim: true,
+    },
+    defaultMetaKeywords: {
+      type: String,
+      default: 'luxury perfume, extrait de parfum, oud, kannauj rose, ayurvedic skincare, pimples soap, jayrup',
+      trim: true,
+    },
+    googleSiteVerification: {
+      type: String,
+      default: '',
+      trim: true,
+    },
+    ogDefaultImage: {
+      type: String,
+      default: '',
+      trim: true,
+    },
   },
   {
     timestamps: true,

@@ -83,6 +83,7 @@ const productSchema = new mongoose.Schema(
       {
         url: { type: String, required: true },
         publicId: { type: String, default: '' },
+        altText: { type: String, default: '', trim: true },
         isPrimary: { type: Boolean, default: false },
       },
     ],
@@ -117,9 +118,19 @@ const productSchema = new mongoose.Schema(
       index: true,
     },
     seo: {
-      metaTitle: { type: String, default: '' },
-      metaDescription: { type: String, default: '' },
-      canonicalUrl: { type: String, default: '' },
+      metaTitle: { type: String, default: '', trim: true },
+      metaDescription: { type: String, default: '', trim: true },
+      metaKeywords: { type: String, default: '', trim: true },
+      focusKeyword: { type: String, default: '', trim: true },
+      canonicalUrl: { type: String, default: '', trim: true },
+      ogTitle: { type: String, default: '', trim: true },
+      ogDescription: { type: String, default: '', trim: true },
+      ogImage: { type: String, default: '', trim: true },
+      searchIndexing: {
+        type: String,
+        enum: ['INDEX_FOLLOW', 'NOINDEX_NOFOLLOW'],
+        default: 'INDEX_FOLLOW',
+      },
     },
     averageRating: {
       type: Number,

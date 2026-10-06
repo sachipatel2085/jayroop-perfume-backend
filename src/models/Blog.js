@@ -29,6 +29,7 @@ const blogSchema = new mongoose.Schema(
     coverImage: {
       url: { type: String, required: true },
       publicId: { type: String, default: '' },
+      altText: { type: String, default: '', trim: true },
     },
     author: {
       type: String,
@@ -56,9 +57,11 @@ const blogSchema = new mongoose.Schema(
       index: true,
     },
     seo: {
-      metaTitle: { type: String, default: '' },
-      metaDescription: { type: String, default: '' },
-      canonicalUrl: { type: String, default: '' },
+      metaTitle: { type: String, default: '', trim: true },
+      metaDescription: { type: String, default: '', trim: true },
+      metaKeywords: { type: String, default: '', trim: true },
+      focusKeyword: { type: String, default: '', trim: true },
+      canonicalUrl: { type: String, default: '', trim: true },
     },
     publishedAt: {
       type: Date,

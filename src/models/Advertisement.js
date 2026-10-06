@@ -30,6 +30,16 @@ const advertisementSchema = new mongoose.Schema(
       type: String,
       default: '', // Thumbnail / poster image for instant video placeholder
     },
+    altText: {
+      type: String,
+      default: '',
+      trim: true,
+    },
+    seoTitle: {
+      type: String,
+      default: '',
+      trim: true,
+    },
     ctaText: {
       type: String,
       default: 'EXPLORE COLLECTION',

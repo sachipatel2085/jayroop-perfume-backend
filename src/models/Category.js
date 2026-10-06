@@ -30,6 +30,7 @@ const categorySchema = new mongoose.Schema(
     image: {
       url: { type: String, default: '' },
       publicId: { type: String, default: '' },
+      altText: { type: String, default: '', trim: true },
     },
     featured: {
       type: Boolean,
@@ -42,8 +43,11 @@ const categorySchema = new mongoose.Schema(
       index: true,
     },
     seo: {
-      metaTitle: { type: String, default: '' },
-      metaDescription: { type: String, default: '' },
+      metaTitle: { type: String, default: '', trim: true },
+      metaDescription: { type: String, default: '', trim: true },
+      metaKeywords: { type: String, default: '', trim: true },
+      focusKeyword: { type: String, default: '', trim: true },
+      canonicalUrl: { type: String, default: '', trim: true },
     },
   },
   {
