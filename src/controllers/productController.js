@@ -181,6 +181,7 @@ export const createProduct = async (req, res, next) => {
       videos,
       variants,
       specifications,
+      fragranceNotes,
       tags,
       featured,
       status,
@@ -208,12 +209,24 @@ export const createProduct = async (req, res, next) => {
       });
     }
 
+    // Synchronize fragrance notes with specifications map for seamless frontend rendering
+    const finalSpecifications = { ...(specifications || {}) };
+    if (fragranceNotes?.topNotes && !finalSpecifications['Top Notes']) {
+      finalSpecifications['Top Notes'] = fragranceNotes.topNotes;
+    }
+    if (fragranceNotes?.heartNotes && !finalSpecifications['Heart Notes']) {
+      finalSpecifications['Heart Notes'] = fragranceNotes.heartNotes;
+    }
+    if (fragranceNotes?.baseNotes && !finalSpecifications['Base Notes']) {
+      finalSpecifications['Base Notes'] = fragranceNotes.baseNotes;
+    }
+
     const product = await Product.create({
       name,
       slug: formattedSlug,
       category,
       subCategory: subCategory || null,
-      brand: brand || 'Jayroop Special',
+      brand: brand || 'Jayrup Special',
       shortDescription,
       description,
       price: Number(price),
@@ -223,7 +236,12 @@ export const createProduct = async (req, res, next) => {
       images: images || [],
       videos: videos || [],
       variants: variants || [],
-      specifications: specifications || {},
+      specifications: finalSpecifications,
+      fragranceNotes: fragranceNotes || {
+        topNotes: finalSpecifications['Top Notes'] || '',
+        heartNotes: finalSpecifications['Heart Notes'] || '',
+        baseNotes: finalSpecifications['Base Notes'] || '',
+      },
       tags: tags || [],
       featured: featured || false,
       status: status || 'ACTIVE',
@@ -266,6 +284,13 @@ export const updateProduct = async (req, res, next) => {
 
     if (newSlug && newSlug !== oldSlug) {
       await Redirect.registerRedirect(`/products/${oldSlug}`, `/products/${newSlug}`, 'PRODUCT');
+    }
+
+    if (req.body.fragranceNotes) {
+      req.body.specifications = req.body.specifications || {};
+      if (req.body.fragranceNotes.topNotes) req.body.specifications['Top Notes'] = req.body.fragranceNotes.topNotes;
+      if (req.body.fragranceNotes.heartNotes) req.body.specifications['Heart Notes'] = req.body.fragranceNotes.heartNotes;
+      if (req.body.fragranceNotes.baseNotes) req.body.specifications['Base Notes'] = req.body.fragranceNotes.baseNotes;
     }
 
     const updated = await Product.findByIdAndUpdate(req.params.id, req.body, {

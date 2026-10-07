@@ -100,6 +100,11 @@ const productSchema = new mongoose.Schema(
       of: String,
       default: {},
     },
+    fragranceNotes: {
+      topNotes: { type: String, default: '', trim: true },
+      heartNotes: { type: String, default: '', trim: true },
+      baseNotes: { type: String, default: '', trim: true },
+    },
     tags: [
       {
         type: String,
