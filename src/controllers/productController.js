@@ -1,5 +1,6 @@
 import { Product } from '../models/Product.js';
 import { Category } from '../models/Category.js';
+import { Redirect } from '../models/Redirect.js';
 import { logAdminAction } from '../utils/auditLogger.js';
 
 // @desc    Get all products with filtering, search, sorting & pagination
@@ -260,6 +261,13 @@ export const updateProduct = async (req, res, next) => {
       });
     }
 
+    const oldSlug = product.slug;
+    const newSlug = req.body.slug ? req.body.slug.toLowerCase().trim() : null;
+
+    if (newSlug && newSlug !== oldSlug) {
+      await Redirect.registerRedirect(`/products/${oldSlug}`, `/products/${newSlug}`, 'PRODUCT');
+    }
+
     const updated = await Product.findByIdAndUpdate(req.params.id, req.body, {
       new: true,
       runValidators: true,
@@ -270,7 +278,7 @@ export const updateProduct = async (req, res, next) => {
       action: 'PRODUCT_UPDATED',
       resource: 'Product',
       resourceId: updated._id.toString(),
-      details: { name: updated.name, sku: updated.sku, stock: updated.stock },
+      details: { name: updated.name, sku: updated.sku, stock: updated.stock, slugChanged: Boolean(newSlug && newSlug !== oldSlug) },
     });
 
     res.status(200).json({

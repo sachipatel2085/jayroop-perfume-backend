@@ -1,5 +1,6 @@
 import { Category } from '../models/Category.js';
 import { Product } from '../models/Product.js';
+import { Redirect } from '../models/Redirect.js';
 import { logAdminAction } from '../utils/auditLogger.js';
 
 // @desc    Get all active categories with subcategories
@@ -111,6 +112,13 @@ export const updateCategory = async (req, res, next) => {
         success: false,
         message: 'Category not found',
       });
+    }
+
+    const oldSlug = category.slug;
+    const newSlug = req.body.slug ? req.body.slug.toLowerCase().trim() : null;
+
+    if (newSlug && newSlug !== oldSlug) {
+      await Redirect.registerRedirect(`/category/${oldSlug}`, `/category/${newSlug}`, 'CATEGORY');
     }
 
     const updated = await Category.findByIdAndUpdate(req.params.id, req.body, {

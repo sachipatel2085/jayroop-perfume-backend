@@ -24,6 +24,8 @@ import uploadRoutes from "./src/routes/uploadRoutes.js";
 import influencerRoutes from "./src/routes/influencerRoutes.js";
 import settingRoutes from "./src/routes/settingRoutes.js";
 import contactRoutes from "./src/routes/contactRoutes.js";
+import seoRoutes from "./src/routes/seoRoutes.js";
+import { getSitemapXml, getRobotsTxt, getGoogleMerchantFeed } from "./src/controllers/seoController.js";
 import path from "path";
 import { fileURLToPath } from "url";
 
@@ -106,6 +108,12 @@ app.use("/api/v1/upload", uploadRoutes);
 app.use("/api/v1/influencers", influencerRoutes);
 app.use("/api/v1/settings", settingRoutes);
 app.use("/api/v1/contact", contactRoutes);
+app.use("/api/v1/seo", seoRoutes);
+
+// Root SEO & Search Engine Endpoints (Direct discovery)
+app.get("/sitemap.xml", getSitemapXml);
+app.get("/robots.txt", getRobotsTxt);
+app.get("/google-merchant-feed.xml", getGoogleMerchantFeed);
 
 // Static uploads serving (development fallback)
 app.use("/uploads", express.static(path.join(__dirname, "public/uploads")));

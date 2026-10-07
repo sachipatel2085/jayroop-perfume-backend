@@ -1,4 +1,5 @@
 import { Blog } from '../models/Blog.js';
+import { Redirect } from '../models/Redirect.js';
 import { logAdminAction } from '../utils/auditLogger.js';
 
 // @desc    Get all published blogs
@@ -140,14 +141,22 @@ export const createBlog = async (req, res, next) => {
 // @access  Private/Admin
 export const updateBlog = async (req, res, next) => {
   try {
+    const blog = await Blog.findById(req.params.id);
+    if (!blog) {
+      return res.status(404).json({ success: false, message: 'Article not found' });
+    }
+
+    const oldSlug = blog.slug;
+    const newSlug = req.body.slug ? req.body.slug.toLowerCase().trim() : null;
+
+    if (newSlug && newSlug !== oldSlug) {
+      await Redirect.registerRedirect(`/blog/${oldSlug}`, `/blog/${newSlug}`, 'BLOG');
+    }
+
     const updated = await Blog.findByIdAndUpdate(req.params.id, req.body, {
       new: true,
       runValidators: true,
     });
-
-    if (!updated) {
-      return res.status(404).json({ success: false, message: 'Article not found' });
-    }
 
     await logAdminAction({
       req,
