@@ -7,10 +7,11 @@ import {
   deleteCoupon,
 } from '../controllers/couponController.js';
 import { protect, authorize } from '../middleware/authMiddleware.js';
+import { couponLimiter } from '../middleware/rateLimiter.js';
 
 const router = express.Router();
 
-router.post('/validate', validateCoupon);
+router.post('/validate', couponLimiter, validateCoupon);
 
 // Admin routes
 router.use(protect, authorize('ADMIN', 'SUPER_ADMIN'));

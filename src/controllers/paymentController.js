@@ -209,6 +209,16 @@ export const verifyPayment = async (req, res, next) => {
       });
     }
 
+    // Ownership check: Ensure requesting user owns this order (or is an Admin)
+    const isOwner = order.user && req.user && order.user.toString() === req.user._id.toString();
+    const isAdmin = req.user && ['ADMIN', 'SUPER_ADMIN'].includes(req.user.role);
+    if (!isOwner && !isAdmin) {
+      return res.status(403).json({
+        success: false,
+        message: 'Forbidden: You do not have permission to verify payment for this order',
+      });
+    }
+
     // Idempotency check: Already processed
     if (order.paymentStatus === 'PAID') {
       return res.status(200).json({
@@ -219,11 +229,20 @@ export const verifyPayment = async (req, res, next) => {
     }
 
     // Cryptographic signature check
+    const isProduction = process.env.NODE_ENV === 'production';
     const isRealKey =
       process.env.RAZORPAY_KEY_ID &&
       !process.env.RAZORPAY_KEY_ID.includes('JayroopLuxuryKey');
 
-    if (isRealKey && razorpay_signature) {
+    // In production or when real key is configured, enforce valid signature
+    if (isProduction || (isRealKey && razorpay_signature)) {
+      if (!razorpay_signature) {
+        return res.status(400).json({
+          success: false,
+          message: 'Security Alert: Cryptographic payment signature is strictly required in production mode',
+        });
+      }
+
       const isValid = verifyRazorpaySignature(
         razorpay_order_id,
         razorpay_payment_id,
@@ -265,17 +284,27 @@ export const verifyPayment = async (req, res, next) => {
 
     // Atomically decrement stock for products and variants
     for (const item of order.items) {
-      const product = await Product.findById(item.product);
-      if (product) {
-        if (item.variant?.sku && product.variants?.length > 0) {
-          const v = product.variants.find((vr) => vr.sku === item.variant.sku);
-          if (v) {
-            v.stock = Math.max(0, v.stock - item.quantity);
-          }
-        }
-        product.stock = Math.max(0, product.stock - item.quantity);
-        await product.save();
+      const qty = Number(item.quantity) || 1;
+      if (item.variant?.sku) {
+        await Product.updateOne(
+          { _id: item.product, 'variants.sku': item.variant.sku },
+          { $inc: { 'variants.$.stock': -qty, stock: -qty } }
+        );
+        // Ensure inventory does not drop below 0
+        await Product.updateOne(
+          { _id: item.product, 'variants.sku': item.variant.sku, 'variants.stock': { $lt: 0 } },
+          { $set: { 'variants.$.stock': 0 } }
+        );
+      } else {
+        await Product.updateOne(
+          { _id: item.product },
+          { $inc: { stock: -qty } }
+        );
       }
+      await Product.updateOne(
+        { _id: item.product, stock: { $lt: 0 } },
+        { $set: { stock: 0 } }
+      );
     }
 
     // If a coupon was applied, increment usage count
@@ -489,26 +518,36 @@ export const createCodOrder = async (req, res, next) => {
       ],
     });
 
-    // 7. Deduct inventory stock for products and variants
+    // 7. Deduct inventory stock for products and variants atomically
     for (const item of orderItemsSnapshot) {
-      const product = await Product.findById(item.product);
-      if (product) {
-        if (item.variant?.sku && product.variants?.length > 0) {
-          const v = product.variants.find((vr) => vr.sku === item.variant.sku);
-          if (v) {
-            v.stock = Math.max(0, v.stock - item.quantity);
-          }
-        }
-        product.stock = Math.max(0, product.stock - item.quantity);
-        await product.save();
+      const qty = Number(item.quantity) || 1;
+      if (item.variant?.sku) {
+        await Product.updateOne(
+          { _id: item.product, 'variants.sku': item.variant.sku },
+          { $inc: { 'variants.$.stock': -qty, stock: -qty } }
+        );
+        // Ensure inventory does not drop below 0
+        await Product.updateOne(
+          { _id: item.product, 'variants.sku': item.variant.sku, 'variants.stock': { $lt: 0 } },
+          { $set: { 'variants.$.stock': 0 } }
+        );
+      } else {
+        await Product.updateOne(
+          { _id: item.product },
+          { $inc: { stock: -qty } }
+        );
       }
+      await Product.updateOne(
+        { _id: item.product, stock: { $lt: 0 } },
+        { $set: { stock: 0 } }
+      );
     }
 
-    // 8. Increment coupon usage if applied
+    // 8. Increment coupon usage if applied (using correct schema field timesUsed)
     if (appliedCoupon) {
       await Coupon.findOneAndUpdate(
         { code: appliedCoupon.code },
-        { $inc: { usedCount: 1 } }
+        { $inc: { timesUsed: 1 } }
       );
     }
 

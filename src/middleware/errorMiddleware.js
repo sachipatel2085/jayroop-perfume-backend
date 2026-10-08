@@ -46,9 +46,16 @@ export const errorHandler = (err, req, res, next) => {
   }
 
   // Default server error
-  res.status(error.statusCode || 500).json({
+  const statusCode = error.statusCode || 500;
+  const isProduction = process.env.NODE_ENV === 'production';
+  const responseMessage =
+    statusCode === 500 && isProduction
+      ? 'An unexpected internal server error occurred. Please contact customer support.'
+      : error.message || 'Internal Server Error';
+
+  res.status(statusCode).json({
     success: false,
-    message: error.message || 'Internal Server Error',
+    message: responseMessage,
     errors: error.errors || [],
   });
 };

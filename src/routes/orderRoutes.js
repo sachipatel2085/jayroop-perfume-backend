@@ -6,12 +6,12 @@ import {
   updateOrderStatus,
   updateOrderTracking,
 } from '../controllers/orderController.js';
-import { protect, authorize } from '../middleware/authMiddleware.js';
+import { protect, authorize, optionalAuth } from '../middleware/authMiddleware.js';
 
 const router = express.Router();
 
 router.get('/my-orders', protect, getMyOrders);
-router.get('/:identifier', getOrderByIdentifier); // Can be public for tracking by orderNumber
+router.get('/:identifier', optionalAuth, getOrderByIdentifier); // Authenticated owner sees full PII; guest tracking redacts PII
 
 // Admin routes
 router.get('/', protect, authorize('ADMIN', 'SUPER_ADMIN'), getAllOrders);

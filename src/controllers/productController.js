@@ -286,14 +286,27 @@ export const updateProduct = async (req, res, next) => {
       await Redirect.registerRedirect(`/products/${oldSlug}`, `/products/${newSlug}`, 'PRODUCT');
     }
 
-    if (req.body.fragranceNotes) {
-      req.body.specifications = req.body.specifications || {};
-      if (req.body.fragranceNotes.topNotes) req.body.specifications['Top Notes'] = req.body.fragranceNotes.topNotes;
-      if (req.body.fragranceNotes.heartNotes) req.body.specifications['Heart Notes'] = req.body.fragranceNotes.heartNotes;
-      if (req.body.fragranceNotes.baseNotes) req.body.specifications['Base Notes'] = req.body.fragranceNotes.baseNotes;
+    const allowedFields = [
+      'name', 'slug', 'category', 'subCategory', 'brand', 'shortDescription',
+      'description', 'price', 'salePrice', 'sku', 'stock', 'images', 'videos',
+      'variants', 'specifications', 'fragranceNotes', 'tags', 'featured', 'status', 'seo'
+    ];
+
+    const updateData = {};
+    for (const key of allowedFields) {
+      if (req.body[key] !== undefined) {
+        updateData[key] = req.body[key];
+      }
     }
 
-    const updated = await Product.findByIdAndUpdate(req.params.id, req.body, {
+    if (updateData.fragranceNotes) {
+      updateData.specifications = updateData.specifications || (product.specifications ? Object.fromEntries(product.specifications) : {});
+      if (updateData.fragranceNotes.topNotes) updateData.specifications['Top Notes'] = updateData.fragranceNotes.topNotes;
+      if (updateData.fragranceNotes.heartNotes) updateData.specifications['Heart Notes'] = updateData.fragranceNotes.heartNotes;
+      if (updateData.fragranceNotes.baseNotes) updateData.specifications['Base Notes'] = updateData.fragranceNotes.baseNotes;
+    }
+
+    const updated = await Product.findByIdAndUpdate(req.params.id, updateData, {
       new: true,
       runValidators: true,
     });

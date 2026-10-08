@@ -65,6 +65,58 @@ export const getOrderByIdentifier = async (req, res, next) => {
       });
     }
 
+    const isOwner = req.user && order.user && req.user._id.toString() === order.user.toString();
+    const isAdmin = req.user && ['ADMIN', 'SUPER_ADMIN'].includes(req.user.role);
+
+    // If requester is NOT the verified owner and NOT an admin:
+    if (!isOwner && !isAdmin) {
+      // Direct MongoDB ID lookup without ownership is strictly forbidden
+      if (!identifier.startsWith('JR-')) {
+        return res.status(403).json({
+          success: false,
+          message: 'Access denied: You do not have permission to inspect this order',
+        });
+      }
+
+      // Public lookup via order reference number (JR-XXXX) provides delivery tracking with masked PII
+      const sanitized = order.toObject();
+      if (sanitized.paymentInfo) {
+        delete sanitized.paymentInfo.razorpaySignature;
+        delete sanitized.paymentInfo.razorpayPaymentId;
+      }
+      delete sanitized.user;
+
+      if (sanitized.shippingAddress) {
+        const rawName = sanitized.shippingAddress.fullName || 'Customer';
+        const maskedName = rawName
+          .split(' ')
+          .map((part) => (part.length > 1 ? part[0] + '*'.repeat(part.length - 1) : part))
+          .join(' ');
+
+        const rawPhone = (sanitized.shippingAddress.phone || '').toString();
+        const maskedPhone =
+          rawPhone.length > 4
+            ? '*'.repeat(Math.max(0, rawPhone.length - 4)) + rawPhone.slice(-4)
+            : '******';
+
+        sanitized.shippingAddress = {
+          fullName: maskedName,
+          phone: maskedPhone,
+          addressLine1: '*** (Address hidden for privacy)',
+          addressLine2: '',
+          city: sanitized.shippingAddress.city,
+          state: sanitized.shippingAddress.state,
+          postalCode: sanitized.shippingAddress.postalCode,
+          country: sanitized.shippingAddress.country,
+        };
+      }
+
+      return res.status(200).json({
+        success: true,
+        data: sanitized,
+      });
+    }
+
     res.status(200).json({
       success: true,
       data: order,
