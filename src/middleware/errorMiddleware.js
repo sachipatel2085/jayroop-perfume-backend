@@ -3,8 +3,8 @@ export const errorHandler = (err, req, res, next) => {
   error.message = err.message;
 
   // Log error for developers
-  console.error(`[Server Error] ${err.name}: ${err.message}`);
-  if (process.env.NODE_ENV !== 'production' && err.stack) {
+  if ((err.statusCode || 500) >= 500) console.error(`[Server Error] ${err.name}: ${err.message}`);
+  if (process.env.NODE_ENV !== 'production' && err.stack && (err.statusCode || 500) >= 500) {
     console.error(err.stack);
   }
 
@@ -45,8 +45,20 @@ export const errorHandler = (err, req, res, next) => {
     });
   }
 
+  // Payload too large / malformed JSON
+  if (err.type === 'entity.too.large') {
+    return res.status(413).json({ success: false, message: 'Request body is too large.', errors: [] });
+  }
+  if (err.type === 'entity.parse.failed') {
+    return res.status(400).json({ success: false, message: 'Malformed JSON body.', errors: [] });
+  }
+  // Multer upload errors
+  if (err.name === 'MulterError') {
+    return res.status(400).json({ success: false, message: err.message, errors: [] });
+  }
+
   // Default server error
-  const statusCode = error.statusCode || 500;
+  const statusCode = error.statusCode || err.statusCode || 500;
   const isProduction = process.env.NODE_ENV === 'production';
   const responseMessage =
     statusCode === 500 && isProduction
@@ -62,6 +74,6 @@ export const errorHandler = (err, req, res, next) => {
 
 export const notFound = (req, res, next) => {
   const error = new Error(`Not Found - ${req.originalUrl}`);
-  res.status(404);
+  error.statusCode = 404;
   next(error);
 };

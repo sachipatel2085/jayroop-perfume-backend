@@ -15,13 +15,14 @@ const fileFilter = (req, file, cb) => {
     'image/png',
     'image/webp',
     'image/gif',
-    'image/svg+xml',
+    'image/avif',
     'video/mp4',
     'video/webm',
     'video/quicktime',
   ];
 
-  if (allowedMimeTypes.includes(file.mimetype) || file.mimetype.startsWith('image/')) {
+  // SVG is intentionally NOT allowed (can carry scripts → stored XSS)
+  if (allowedMimeTypes.includes(file.mimetype)) {
     cb(null, true);
   } else {
     cb(new Error(`Unsupported file type: ${file.mimetype}. Please upload JPG, PNG, WebP, or MP4.`), false);

@@ -33,3 +33,5 @@ Thumbs.db
 # Temporary files
 *.tmp
 *.temp
+# PDF/XLSX smoke-test output
+smoke-output/

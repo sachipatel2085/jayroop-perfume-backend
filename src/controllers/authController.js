@@ -1,15 +1,26 @@
 import jwt from 'jsonwebtoken';
+import crypto from 'crypto';
+import validator from 'validator';
 import { User } from '../models/User.js';
+import { jwtSecret } from '../middleware/authMiddleware.js';
+import { sendPasswordResetMail } from '../services/mailer.js';
+import { isValidIndianPhone, isValidPincode } from '../utils/helpers.js';
+import { canonicalStateName, findState } from '../utils/indiaStates.js';
 
 // Generate JWT Token
 const generateToken = (id) => {
-  return jwt.sign(
-    { id },
-    process.env.JWT_SECRET || 'jayroop_royal_luxury_secret_key_2026_super_secure',
-    {
-      expiresIn: process.env.JWT_EXPIRES_IN || '7d',
-    }
-  );
+  return jwt.sign({ id }, jwtSecret(), {
+    expiresIn: process.env.JWT_EXPIRES_IN || '7d',
+  });
+};
+
+const validateAddressInput = (body) => {
+  const { fullName, phone, addressLine1, city, state, postalCode } = body;
+  if (!fullName || !phone || !addressLine1 || !city || !state || !postalCode) return 'Please provide all required address fields';
+  if (!isValidIndianPhone(phone)) return 'Please enter a valid 10-digit mobile number';
+  if (!isValidPincode(postalCode)) return 'Please enter a valid 6-digit PIN code';
+  if (!findState(state)) return 'Please select a valid Indian state';
+  return null;
 };
 
 // @desc    Register a new customer
@@ -25,6 +36,15 @@ export const register = async (req, res, next) => {
         message: 'Please provide name, email, and password',
       });
     }
+    if (!validator.isEmail(String(email))) {
+      return res.status(400).json({ success: false, message: 'Please enter a valid email address' });
+    }
+    if (String(password).length < 8) {
+      return res.status(400).json({ success: false, message: 'Password must be at least 8 characters long' });
+    }
+    if (phone && !isValidIndianPhone(phone)) {
+      return res.status(400).json({ success: false, message: 'Please enter a valid 10-digit mobile number' });
+    }
 
     const existingUser = await User.findOne({ email: email.toLowerCase() });
     if (existingUser) {
@@ -35,11 +55,12 @@ export const register = async (req, res, next) => {
     }
 
     const user = await User.create({
-      name,
-      email: email.toLowerCase(),
+      name: String(name).trim().slice(0, 60),
+      email: email.toLowerCase().trim(),
       password,
       phone: phone || '',
       role: 'CUSTOMER',
+      marketingOptIn: Boolean(req.body.marketingOptIn),
     });
 
     const token = generateToken(user._id);
@@ -104,6 +125,8 @@ export const login = async (req, res, next) => {
       });
     }
 
+    user.lastLoginAt = new Date();
+    await user.save({ validateBeforeSave: false });
     const token = generateToken(user._id);
 
     res.status(200).json({
@@ -149,8 +172,12 @@ export const updateProfile = async (req, res, next) => {
     const { name, phone } = req.body;
     const user = await User.findById(req.user._id);
 
-    if (name) user.name = name;
-    if (phone !== undefined) user.phone = phone;
+    if (phone && !isValidIndianPhone(phone)) {
+      return res.status(400).json({ success: false, message: 'Please enter a valid 10-digit mobile number' });
+    }
+    if (name) user.name = String(name).trim().slice(0, 60);
+    if (phone !== undefined) user.phone = String(phone).trim();
+    if (req.body.marketingOptIn !== undefined) user.marketingOptIn = Boolean(req.body.marketingOptIn);
 
     await user.save();
 
@@ -163,6 +190,7 @@ export const updateProfile = async (req, res, next) => {
         email: user.email,
         phone: user.phone,
         role: user.role,
+        marketingOptIn: user.marketingOptIn,
       },
     });
   } catch (error) {
@@ -188,11 +216,10 @@ export const addAddress = async (req, res, next) => {
       isDefault,
     } = req.body;
 
-    if (!fullName || !phone || !addressLine1 || !city || !state || !postalCode) {
-      return res.status(400).json({
-        success: false,
-        message: 'Please provide all required address fields',
-      });
+    const invalid = validateAddressInput(req.body);
+    if (invalid) return res.status(400).json({ success: false, message: invalid });
+    if (user.addresses.length >= 10) {
+      return res.status(400).json({ success: false, message: 'You can save up to 10 addresses. Please remove one first.' });
     }
 
     if (isDefault || user.addresses.length === 0) {
@@ -205,10 +232,10 @@ export const addAddress = async (req, res, next) => {
       addressLine1,
       addressLine2: addressLine2 || '',
       city,
-      state,
-      postalCode,
+      state: canonicalStateName(state),
+      postalCode: String(postalCode).trim(),
       country: country || 'India',
-      isDefault: isDefault || user.addresses.length === 0,
+      isDefault: Boolean(isDefault) || user.addresses.length === 0,
     });
 
     await user.save();
@@ -232,6 +259,7 @@ export const deleteAddress = async (req, res, next) => {
     user.addresses = user.addresses.filter(
       (addr) => addr._id.toString() !== req.params.addressId
     );
+    if (user.addresses.length && !user.addresses.some((a) => a.isDefault)) user.addresses[0].isDefault = true;
     await user.save();
 
     res.status(200).json({
@@ -280,6 +308,119 @@ export const toggleWishlist = async (req, res, next) => {
       success: true,
       message: `Product ${action} ${action === 'added' ? 'to' : 'from'} wishlist`,
       data: { wishlist: user.wishlist },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Update a saved address
+// @route   PUT /api/v1/auth/addresses/:addressId
+// @access  Private
+export const updateAddress = async (req, res, next) => {
+  try {
+    const user = await User.findById(req.user._id);
+    const addr = user.addresses.id(req.params.addressId);
+    if (!addr) return res.status(404).json({ success: false, message: 'Address not found' });
+    const merged = { ...addr.toObject(), ...req.body };
+    const invalid = validateAddressInput(merged);
+    if (invalid) return res.status(400).json({ success: false, message: invalid });
+    ['fullName', 'phone', 'addressLine1', 'addressLine2', 'city', 'postalCode'].forEach((k) => {
+      if (req.body[k] !== undefined) addr[k] = String(req.body[k]).trim();
+    });
+    if (req.body.state !== undefined) addr.state = canonicalStateName(req.body.state);
+    if (req.body.isDefault) {
+      user.addresses.forEach((a) => (a.isDefault = false));
+      addr.isDefault = true;
+    }
+    await user.save();
+    res.status(200).json({ success: true, message: 'Address updated', data: user.addresses });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Make an address the default
+// @route   PUT /api/v1/auth/addresses/:addressId/default
+// @access  Private
+export const setDefaultAddress = async (req, res, next) => {
+  try {
+    const user = await User.findById(req.user._id);
+    const addr = user.addresses.id(req.params.addressId);
+    if (!addr) return res.status(404).json({ success: false, message: 'Address not found' });
+    user.addresses.forEach((a) => (a.isDefault = false));
+    addr.isDefault = true;
+    await user.save();
+    res.status(200).json({ success: true, data: user.addresses });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Change password (logged in)
+// @route   PUT /api/v1/auth/password  { currentPassword, newPassword }
+// @access  Private
+export const changePassword = async (req, res, next) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({ success: false, message: 'Please provide your current and new password' });
+    }
+    if (String(newPassword).length < 8) {
+      return res.status(400).json({ success: false, message: 'New password must be at least 8 characters long' });
+    }
+    const user = await User.findById(req.user._id).select('+password');
+    if (!(await user.matchPassword(currentPassword))) {
+      return res.status(401).json({ success: false, message: 'Current password is incorrect' });
+    }
+    user.password = newPassword;
+    await user.save();
+    res.status(200).json({ success: true, message: 'Password updated', data: { token: generateToken(user._id) } });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Request password reset e-mail
+// @route   POST /api/v1/auth/forgot-password  { email }
+// @access  Public
+export const forgotPassword = async (req, res, next) => {
+  try {
+    const email = String(req.body.email || '').toLowerCase().trim();
+    const generic = { success: true, message: 'If an account exists for this e-mail, a reset link has been sent.' };
+    if (!validator.isEmail(email)) return res.status(200).json(generic);
+    const user = await User.findOne({ email, isActive: true });
+    if (!user) return res.status(200).json(generic);
+    const raw = user.createPasswordResetToken();
+    await user.save({ validateBeforeSave: false });
+    await sendPasswordResetMail(user, raw);
+    res.status(200).json(generic);
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Reset password with token
+// @route   POST /api/v1/auth/reset-password/:token  { password }
+// @access  Public
+export const resetPassword = async (req, res, next) => {
+  try {
+    const { password } = req.body;
+    if (!password || String(password).length < 8) {
+      return res.status(400).json({ success: false, message: 'Password must be at least 8 characters long' });
+    }
+    const hashed = crypto.createHash('sha256').update(String(req.params.token)).digest('hex');
+    const user = await User.findOne({ resetPasswordToken: hashed, resetPasswordExpires: { $gt: new Date() } }).select('+resetPasswordToken +resetPasswordExpires');
+    if (!user) return res.status(400).json({ success: false, message: 'This reset link is invalid or has expired. Please request a new one.' });
+    user.password = password;
+    user.resetPasswordToken = undefined;
+    user.resetPasswordExpires = undefined;
+    await user.save();
+    const token = generateToken(user._id);
+    res.status(200).json({
+      success: true,
+      message: 'Password reset successful',
+      data: { _id: user._id, name: user.name, email: user.email, role: user.role, phone: user.phone, token },
     });
   } catch (error) {
     next(error);

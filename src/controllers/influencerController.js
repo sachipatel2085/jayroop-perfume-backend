@@ -1,5 +1,6 @@
 import { InfluencerVideo } from '../models/InfluencerVideo.js';
 import { AuditLog } from '../models/AuditLog.js';
+import { escapeRegex } from '../utils/helpers.js';
 
 /**
  * @desc    Get active influencer videos for storefront (Inspirations & Scent-Fluencers)
@@ -47,9 +48,9 @@ export const getAdminInfluencerVideos = async (req, res, next) => {
     if (status) query.status = status;
     if (search) {
       query.$or = [
-        { title: { $regex: search, $options: 'i' } },
-        { influencerName: { $regex: search, $options: 'i' } },
-        { altText: { $regex: search, $options: 'i' } },
+        { title: { $regex: escapeRegex(search), $options: 'i' } },
+        { influencerName: { $regex: escapeRegex(search), $options: 'i' } },
+        { altText: { $regex: escapeRegex(search), $options: 'i' } },
       ];
     }
 

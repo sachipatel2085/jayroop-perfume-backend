@@ -5,10 +5,11 @@ import {
   updateInquiryStatus,
 } from '../controllers/contactController.js';
 import { protect, authorize } from '../middleware/authMiddleware.js';
+import { couponLimiter as contactLimiter } from '../middleware/rateLimiter.js';
 
 const router = express.Router();
 
-router.post('/', submitContactInquiry);
+router.post('/', contactLimiter, submitContactInquiry);
 router.get('/', protect, authorize('ADMIN', 'SUPER_ADMIN'), getContactInquiries);
 router.patch('/:id', protect, authorize('ADMIN', 'SUPER_ADMIN'), updateInquiryStatus);
 

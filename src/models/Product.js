@@ -1,17 +1,27 @@
 import mongoose from 'mongoose';
 
 const variantSchema = new mongoose.Schema({
-  title: { type: String, required: true, trim: true }, // e.g., "50ml", "100ml", "100g", "50g Cream"
+  title: { type: String, required: true, trim: true }, // e.g. "15 g", "50 ml", "Pack of 2"
   sku: { type: String, required: true, trim: true },
-  price: { type: Number, required: true, min: 0 },
-  salePrice: { type: Number, default: null, min: 0 },
+  price: { type: Number, required: true, min: 0 }, // MRP / regular price (tax inclusive)
+  salePrice: { type: Number, default: null, min: 0 }, // selling price (tax inclusive)
   stock: { type: Number, default: 0, min: 0 },
+  weight: { type: Number, default: null, min: 0 }, // grams (shipping weight)
+  barcode: { type: String, default: '', trim: true }, // GTIN / EAN
   attributes: {
     type: Map,
     of: String,
     default: {},
   },
 });
+
+const faqSchema = new mongoose.Schema(
+  {
+    question: { type: String, required: true, trim: true, maxlength: 300 },
+    answer: { type: String, required: true, trim: true, maxlength: 3000 },
+  },
+  { _id: false }
+);
 
 const productSchema = new mongoose.Schema(
   {
@@ -44,7 +54,7 @@ const productSchema = new mongoose.Schema(
     },
     brand: {
       type: String,
-      default: 'Jayrup Special',
+      default: 'Jayrup',
       trim: true,
     },
     shortDescription: {
@@ -52,10 +62,13 @@ const productSchema = new mongoose.Schema(
       trim: true,
       maxlength: [500, 'Short description cannot exceed 500 characters'],
     },
+    // Long-form rich HTML (written with the admin block editor)
     description: {
       type: String,
       required: [true, 'Please enter detailed product description'],
     },
+
+    // ───────────── Pricing (all prices are GST-inclusive) ─────────────
     price: {
       type: Number,
       required: [true, 'Please enter product base price'],
@@ -79,6 +92,14 @@ const productSchema = new mongoose.Schema(
       default: 0,
       min: 0,
     },
+    lowStockThreshold: { type: Number, default: 5, min: 0 },
+    maxPerOrder: { type: Number, default: 10, min: 1 },
+
+    // ───────────── Tax (GST) ─────────────
+    hsnCode: { type: String, default: '', trim: true }, // 3304 skincare, 3303 perfumes, 3401 soaps
+    gstRate: { type: Number, default: null, min: 0, max: 28 }, // null → store default
+
+    // ───────────── Media ─────────────
     images: [
       {
         url: { type: String, required: true },
@@ -105,6 +126,36 @@ const productSchema = new mongoose.Schema(
       heartNotes: { type: String, default: '', trim: true },
       baseNotes: { type: String, default: '', trim: true },
     },
+
+    // ───────────── Rich product information (shown as PDP sections + used in SEO) ─────────────
+    highlights: [{ type: String, trim: true, maxlength: 200 }], // key benefit bullets above the fold
+    benefits: { type: String, default: '' }, // rich HTML
+    ingredients: { type: String, default: '' }, // rich HTML / plain list
+    howToUse: { type: String, default: '' }, // rich HTML
+    precautions: { type: String, default: '' }, // rich HTML (external use only, patch test …)
+    skinTypes: [{ type: String, trim: true }], // Oily, Combination, Normal, Dry, Sensitive, All
+    concerns: [{ type: String, trim: true }], // Pimples, Acne marks, Oil control …
+    gender: { type: String, enum: ['UNISEX', 'MEN', 'WOMEN', ''], default: 'UNISEX' },
+    faqs: [faqSchema],
+
+    // ───────────── Legal Metrology (Packaged Commodities) Rules 2011 – e-commerce declarations ─────────────
+    netQuantity: { type: String, default: '', trim: true }, // "15 g", "50 ml"
+    weight: { type: Number, default: null, min: 0 }, // shipping weight in grams
+    dimensions: {
+      length: { type: Number, default: null, min: 0 }, // cm
+      width: { type: Number, default: null, min: 0 },
+      height: { type: Number, default: null, min: 0 },
+    },
+    barcode: { type: String, default: '', trim: true }, // GTIN / EAN-13
+    countryOfOrigin: { type: String, default: 'India', trim: true },
+    shelfLife: { type: String, default: '', trim: true }, // "24 months from manufacturing"
+    manufacturerDetails: { type: String, default: '', trim: true },
+    marketedBy: { type: String, default: '', trim: true },
+    packerDetails: { type: String, default: '', trim: true },
+    importerDetails: { type: String, default: '', trim: true },
+    licenseNumber: { type: String, default: '', trim: true }, // cosmetic manufacturing licence
+    customerCareDetails: { type: String, default: '', trim: true },
+
     tags: [
       {
         type: String,
@@ -148,11 +199,17 @@ const productSchema = new mongoose.Schema(
       default: 0,
       min: 0,
     },
+    totalSold: { type: Number, default: 0, min: 0 },
   },
   {
     timestamps: true,
   }
 );
+
+// Effective selling price helper (GST inclusive)
+productSchema.methods.effectivePrice = function () {
+  return this.salePrice && this.salePrice < this.price ? this.salePrice : this.price;
+};
 
 // Compound text index for powerful search
 productSchema.index({ name: 'text', brand: 'text', tags: 'text', shortDescription: 'text' });

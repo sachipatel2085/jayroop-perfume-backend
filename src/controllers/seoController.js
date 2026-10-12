@@ -2,14 +2,11 @@ import { Product } from '../models/Product.js';
 import { Category } from '../models/Category.js';
 import { Blog } from '../models/Blog.js';
 import { Redirect } from '../models/Redirect.js';
+import { Setting } from '../models/Setting.js';
+import { siteUrl, buildSeoForPath, renderHeadHtml, STATIC_SITEMAP_ROUTES, LEGACY_REDIRECTS, resolveLegacyRedirect, truncate } from '../seo/headBuilder.js';
 
-const getBaseUrl = () => {
-  return process.env.CLIENT_URL || 'https://jayrup.com';
-};
-
-// Helper to escape XML special characters
 const escapeXml = (unsafe) => {
-  if (!unsafe) return '';
+  if (unsafe === null || unsafe === undefined) return '';
   return String(unsafe)
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
@@ -18,212 +15,54 @@ const escapeXml = (unsafe) => {
     .replace(/'/g, '&apos;');
 };
 
-// @desc    Dynamic XML Sitemap generation
-// @route   GET /sitemap.xml or GET /api/v1/seo/sitemap.xml
+const absUrl = (u) => (!u ? '' : /^https?:\/\//.test(u) ? u : `${siteUrl()}${u.startsWith('/') ? '' : '/'}${u}`);
+const day = (d) => new Date(d || Date.now()).toISOString().split('T')[0];
+
+// @desc    Dynamic XML sitemap with image extensions
+// @route   GET /sitemap.xml  |  GET /api/v1/seo/sitemap.xml
 // @access  Public
 export const getSitemapXml = async (req, res, next) => {
   try {
-    const baseUrl = getBaseUrl();
-    const now = new Date().toISOString().split('T')[0];
-
-    // 1. Fetch active data from DB
+    const base = siteUrl();
     const [products, categories, blogs] = await Promise.all([
-      Product.find({ status: 'ACTIVE', 'seo.searchIndexing': { $ne: 'NOINDEX_NOFOLLOW' } })
-        .select('slug updatedAt images name shortDescription')
-        .lean(),
-      Category.find({ status: 'ACTIVE' })
-        .select('slug updatedAt image name description')
-        .lean(),
-      Blog.find({ status: 'PUBLISHED' })
-        .select('slug updatedAt coverImage title excerpt')
-        .lean(),
+      Product.find({ status: 'ACTIVE', 'seo.searchIndexing': { $ne: 'NOINDEX_NOFOLLOW' } }).select('slug updatedAt images name').lean(),
+      Category.find({ status: 'ACTIVE' }).select('slug updatedAt image name').lean(),
+      Blog.find({ status: 'PUBLISHED' }).select('slug updatedAt coverImage title').lean(),
     ]);
 
-    // 2. Static Landing Pages
-    const staticPages = [
-      { url: '/', changefreq: 'daily', priority: '1.0' },
-      { url: '/shop', changefreq: 'daily', priority: '0.9' },
-      { url: '/about', changefreq: 'monthly', priority: '0.7' },
-      { url: '/contact', changefreq: 'monthly', priority: '0.7' },
-      { url: '/faq', changefreq: 'weekly', priority: '0.8' },
-      { url: '/blog', changefreq: 'weekly', priority: '0.8' },
-      { url: '/shipping-policy', changefreq: 'monthly', priority: '0.4' },
-      { url: '/return-policy', changefreq: 'monthly', priority: '0.4' },
-      { url: '/privacy-policy', changefreq: 'yearly', priority: '0.3' },
-      { url: '/terms-of-service', changefreq: 'yearly', priority: '0.3' },
-    ];
+    const latest = [...products, ...blogs].reduce((m, d) => (d.updatedAt > m ? d.updatedAt : m), new Date(0));
+    const urls = [];
+    STATIC_SITEMAP_ROUTES.forEach((p) =>
+      urls.push({ loc: `${base}${p.url === '/' ? '/' : p.url}`, lastmod: day(['/', '/shop', '/blog'].includes(p.url) ? latest : undefined), changefreq: p.changefreq, priority: p.priority })
+    );
+    categories.forEach((c) =>
+      urls.push({ loc: `${base}/category/${c.slug}`, lastmod: day(c.updatedAt), changefreq: 'weekly', priority: '0.8', images: c.image?.url ? [{ loc: absUrl(c.image.url), title: c.name }] : [] })
+    );
+    products.forEach((p) =>
+      urls.push({
+        loc: `${base}/products/${p.slug}`,
+        lastmod: day(p.updatedAt),
+        changefreq: 'weekly',
+        priority: '0.9',
+        images: (p.images || []).slice(0, 8).map((i) => ({ loc: absUrl(i.url), title: i.altText || p.name })),
+      })
+    );
+    blogs.forEach((b) =>
+      urls.push({ loc: `${base}/blog/${b.slug}`, lastmod: day(b.updatedAt), changefreq: 'monthly', priority: '0.7', images: b.coverImage?.url ? [{ loc: absUrl(b.coverImage.url), title: b.title }] : [] })
+    );
 
-    let xml = `<?xml version="1.0" encoding="UTF-8"?>\n`;
-    xml += `<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:image="http://www.google.com/schemas/sitemap-image/1.1">\n`;
+    let xml = '<?xml version="1.0" encoding="UTF-8"?>\n';
+    xml += '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:image="http://www.google.com/schemas/sitemap-image/1.1">\n';
+    urls.forEach((u) => {
+      xml += `  <url>\n    <loc>${escapeXml(u.loc)}</loc>\n    <lastmod>${u.lastmod}</lastmod>\n    <changefreq>${u.changefreq}</changefreq>\n    <priority>${u.priority}</priority>\n`;
+      (u.images || []).forEach((img) => {
+        xml += `    <image:image>\n      <image:loc>${escapeXml(img.loc)}</image:loc>\n      <image:title>${escapeXml(img.title)}</image:title>\n    </image:image>\n`;
+      });
+      xml += '  </url>\n';
+    });
+    xml += '</urlset>';
 
-    // Add Static Pages
-    for (const page of staticPages) {
-      xml += `  <url>\n`;
-      xml += `    <loc>${baseUrl}${page.url}</loc>\n`;
-      xml += `    <lastmod>${now}</lastmod>\n`;
-      xml += `    <changefreq>${page.changefreq}</changefreq>\n`;
-      xml += `    <priority>${page.priority}</priority>\n`;
-      xml += `  </url>\n`;
-    }
-
-    // Add Categories
-    for (const cat of categories) {
-      const lastMod = cat.updatedAt ? new Date(cat.updatedAt).toISOString().split('T')[0] : now;
-      xml += `  <url>\n`;
-      xml += `    <loc>${baseUrl}/category/${cat.slug}</loc>\n`;
-      xml += `    <lastmod>${lastMod}</lastmod>\n`;
-      xml += `    <changefreq>weekly</changefreq>\n`;
-      xml += `    <priority>0.85</priority>\n`;
-      if (cat.image?.url) {
-        xml += `    <image:image>\n`;
-        xml += `      <image:loc>${escapeXml(cat.image.url)}</image:loc>\n`;
-        xml += `      <image:title>${escapeXml(cat.name)}</image:title>\n`;
-        xml += `    </image:image>\n`;
-      }
-      xml += `  </url>\n`;
-    }
-
-    // Add Products (with Image Sitemap tags)
-    for (const prod of products) {
-      const lastMod = prod.updatedAt ? new Date(prod.updatedAt).toISOString().split('T')[0] : now;
-      xml += `  <url>\n`;
-      xml += `    <loc>${baseUrl}/products/${prod.slug}</loc>\n`;
-      xml += `    <lastmod>${lastMod}</lastmod>\n`;
-      xml += `    <changefreq>daily</changefreq>\n`;
-      xml += `    <priority>0.95</priority>\n`;
-
-      if (prod.images && prod.images.length > 0) {
-        for (const img of prod.images.slice(0, 3)) {
-          if (img.url) {
-            xml += `    <image:image>\n`;
-            xml += `      <image:loc>${escapeXml(img.url)}</image:loc>\n`;
-            xml += `      <image:title>${escapeXml(img.altText || prod.name)}</image:title>\n`;
-            if (prod.shortDescription) {
-              xml += `      <image:caption>${escapeXml(prod.shortDescription)}</image:caption>\n`;
-            }
-            xml += `    </image:image>\n`;
-          }
-        }
-      }
-      xml += `  </url>\n`;
-    }
-
-    // Add Blog Posts
-    for (const blog of blogs) {
-      const lastMod = blog.updatedAt ? new Date(blog.updatedAt).toISOString().split('T')[0] : now;
-      xml += `  <url>\n`;
-      xml += `    <loc>${baseUrl}/blog/${blog.slug}</loc>\n`;
-      xml += `    <lastmod>${lastMod}</lastmod>\n`;
-      xml += `    <changefreq>weekly</changefreq>\n`;
-      xml += `    <priority>0.8</priority>\n`;
-      if (blog.coverImage?.url) {
-        xml += `    <image:image>\n`;
-        xml += `      <image:loc>${escapeXml(blog.coverImage.url)}</image:loc>\n`;
-        xml += `      <image:title>${escapeXml(blog.title)}</image:title>\n`;
-        xml += `    </image:image>\n`;
-      }
-      xml += `  </url>\n`;
-    }
-
-    xml += `</urlset>`;
-
-    res.header('Content-Type', 'application/xml');
-    res.header('Cache-Control', 'public, max-age=3600'); // Cache for 1 hour
-    return res.status(200).send(xml);
-  } catch (error) {
-    next(error);
-  }
-};
-
-// @desc    Dynamic robots.txt generation
-// @route   GET /robots.txt or GET /api/v1/seo/robots.txt
-// @access  Public
-export const getRobotsTxt = async (req, res) => {
-  const baseUrl = getBaseUrl();
-  const robots = `# Jayrup (JR) Royal Luxury Fragrance & Skincare House - Search Engine Directives
-User-agent: *
-Allow: /
-Allow: /shop
-Allow: /category/
-Allow: /products/
-Allow: /blog/
-Allow: /about
-Allow: /contact
-Allow: /faq
-Allow: /privacy-policy
-Allow: /shipping-policy
-Allow: /return-policy
-Allow: /terms-of-service
-
-# Disallow Private & Administrative Routes
-Disallow: /admin/
-Disallow: /cart
-Disallow: /checkout
-Disallow: /profile
-Disallow: /orders
-Disallow: /order-success/
-Disallow: /api/v1/admin/
-Disallow: /api/v1/auth/
-Disallow: /api/v1/orders/
-Disallow: /api/v1/cart/
-Disallow: /api/v1/payments/
-
-# Dynamic XML Sitemap
-Sitemap: ${baseUrl}/sitemap.xml
-`;
-
-  res.header('Content-Type', 'text/plain');
-  res.header('Cache-Control', 'public, max-age=86400'); // Cache for 24 hours
-  return res.status(200).send(robots);
-};
-
-// @desc    Google Merchant Center RSS 2.0 Product Feed XML
-// @route   GET /google-merchant-feed.xml or GET /api/v1/seo/google-merchant-feed.xml
-// @access  Public
-export const getGoogleMerchantFeed = async (req, res, next) => {
-  try {
-    const baseUrl = getBaseUrl();
-    const products = await Product.find({ status: 'ACTIVE' })
-      .populate('category', 'name')
-      .populate('subCategory', 'name')
-      .lean();
-
-    let xml = `<?xml version="1.0" encoding="UTF-8"?>\n`;
-    xml += `<rss version="2.0" xmlns:g="http://base.google.com/ns/1.0">\n`;
-    xml += `  <channel>\n`;
-    xml += `    <title>Jayrup Royal Luxury Perfumes &amp; Skincare Products</title>\n`;
-    xml += `    <link>${baseUrl}</link>\n`;
-    xml += `    <description>Authentic handcrafted Indian luxury perfumes, extraits de parfum, saffron soaps, and therapeutic cosmetics.</description>\n`;
-
-    for (const prod of products) {
-      const activePrice = (prod.salePrice && prod.salePrice < prod.price ? prod.salePrice : prod.price) || 0;
-      const primaryImage = prod.images?.[0]?.url || `${baseUrl}/src/assets/jayroop-logo.webp`;
-      const categoryName = prod.category?.name || 'Luxury Fragrance';
-
-      xml += `    <item>\n`;
-      xml += `      <g:id>${escapeXml(prod.sku || prod._id.toString())}</g:id>\n`;
-      xml += `      <g:title>${escapeXml(prod.name)}</g:title>\n`;
-      xml += `      <g:description>${escapeXml(prod.shortDescription || prod.description || prod.name)}</g:description>\n`;
-      xml += `      <g:link>${baseUrl}/products/${prod.slug}</g:link>\n`;
-      xml += `      <g:image_link>${escapeXml(primaryImage)}</g:image_link>\n`;
-      xml += `      <g:price>${activePrice.toFixed(2)} INR</g:price>\n`;
-      if (prod.salePrice && prod.salePrice < prod.price) {
-        xml += `      <g:sale_price>${prod.salePrice.toFixed(2)} INR</g:sale_price>\n`;
-      }
-      xml += `      <g:availability>${prod.stock > 0 ? 'in_stock' : 'out_of_stock'}</g:availability>\n`;
-      xml += `      <g:condition>new</g:condition>\n`;
-      xml += `      <g:brand>${escapeXml(prod.brand || 'Jayrup')}</g:brand>\n`;
-      xml += `      <g:identifier_exists>no</g:identifier_exists>\n`;
-      xml += `      <g:mpn>${escapeXml(prod.sku)}</g:mpn>\n`;
-      xml += `      <g:product_type>${escapeXml(categoryName)}</g:product_type>\n`;
-      xml += `      <g:google_product_category>Health &amp; Beauty &gt; Personal Care &gt; Cosmetics &gt; Perfume &amp; Cologne</g:google_product_category>\n`;
-      xml += `    </item>\n`;
-    }
-
-    xml += `  </channel>\n`;
-    xml += `</rss>`;
-
-    res.header('Content-Type', 'application/xml');
+    res.header('Content-Type', 'application/xml; charset=utf-8');
     res.header('Cache-Control', 'public, max-age=3600');
     return res.status(200).send(xml);
   } catch (error) {
@@ -231,30 +70,155 @@ export const getGoogleMerchantFeed = async (req, res, next) => {
   }
 };
 
-// @desc    Lookup 301 redirect for a requested path
-// @route   GET /api/v1/seo/redirects/lookup?url=...
-// @access  Public
+// @desc    robots.txt
+// @route   GET /robots.txt  |  GET /api/v1/seo/robots.txt
+export const getRobotsTxt = async (req, res) => {
+  const base = siteUrl();
+  const robots = `# Jayrup – ${base}
+User-agent: *
+Allow: /
+Disallow: /admin
+Disallow: /cart
+Disallow: /checkout
+Disallow: /account
+Disallow: /profile
+Disallow: /orders
+Disallow: /wishlist
+Disallow: /payment/
+Disallow: /order-success/
+Disallow: /track-order
+Disallow: /login
+Disallow: /register
+Disallow: /forgot-password
+Disallow: /reset-password/
+Disallow: /api/
+Disallow: /*?*sort=
+Disallow: /*?*page=
+Allow: /api/v1/seo/
+
+Sitemap: ${base}/sitemap.xml
+`;
+  res.header('Content-Type', 'text/plain; charset=utf-8');
+  res.header('Cache-Control', 'public, max-age=86400');
+  return res.status(200).send(robots);
+};
+
+const googleCategory = (p) => {
+  const hsn = String(p.hsnCode || '').slice(0, 4);
+  const name = `${p.category?.name || ''} ${p.name}`.toLowerCase();
+  if (hsn === '3303' || /perfume|parfum|attar|fragrance|deo/.test(name)) return 'Health & Beauty > Personal Care > Cosmetics > Perfume & Cologne';
+  if (hsn === '3401' || /soap/.test(name)) return 'Health & Beauty > Personal Care > Cosmetics > Bath & Body > Bar Soap';
+  return 'Health & Beauty > Personal Care > Cosmetics > Skin Care';
+};
+
+// @desc    Google Merchant Center RSS feed (variants become separate items with item_group_id)
+// @route   GET /google-merchant-feed.xml  |  GET /api/v1/seo/google-merchant-feed.xml
+export const getGoogleMerchantFeed = async (req, res, next) => {
+  try {
+    const base = siteUrl();
+    const settings = await Setting.getStoreSettings();
+    const threshold = Number(settings.freeShippingThreshold ?? 999);
+    const fee = Number(settings.flatShippingFee ?? 100);
+    const products = await Product.find({ status: 'ACTIVE' }).populate('category', 'name').lean();
+
+    const item = (p, { id, title, price, salePrice, stock, gtin, groupId, size, weight }) => {
+      const sell = salePrice && salePrice < price ? salePrice : price;
+      const imgs = (p.images || []).map((i) => absUrl(i.url)).filter(Boolean);
+      return `    <item>
+      <g:id>${escapeXml(id)}</g:id>
+      ${groupId ? `<g:item_group_id>${escapeXml(groupId)}</g:item_group_id>` : ''}
+      <g:title>${escapeXml(title.slice(0, 150))}</g:title>
+      <g:description>${escapeXml(truncate(p.shortDescription ? `${p.shortDescription} ${p.description}` : p.description, 4900))}</g:description>
+      <g:link>${base}/products/${p.slug}</g:link>
+      <g:image_link>${escapeXml(imgs[0] || `${base}/logo-512.png`)}</g:image_link>
+      ${imgs.slice(1, 10).map((u) => `<g:additional_image_link>${escapeXml(u)}</g:additional_image_link>`).join('\n      ')}
+      <g:price>${Number(price).toFixed(2)} INR</g:price>
+      ${salePrice && salePrice < price ? `<g:sale_price>${Number(salePrice).toFixed(2)} INR</g:sale_price>` : ''}
+      <g:availability>${stock > 0 ? 'in_stock' : 'out_of_stock'}</g:availability>
+      <g:condition>new</g:condition>
+      <g:brand>${escapeXml(p.brand || 'Jayrup')}</g:brand>
+      ${gtin && /^\d{8,14}$/.test(gtin) ? `<g:gtin>${gtin}</g:gtin>` : '<g:identifier_exists>no</g:identifier_exists>'}
+      <g:mpn>${escapeXml(id)}</g:mpn>
+      ${size ? `<g:size>${escapeXml(size)}</g:size>` : ''}
+      ${weight ? `<g:shipping_weight>${weight} g</g:shipping_weight>` : ''}
+      <g:product_type>${escapeXml(p.category?.name || 'Skincare')}</g:product_type>
+      <g:google_product_category>${escapeXml(googleCategory(p))}</g:google_product_category>
+      <g:shipping><g:country>IN</g:country><g:service>Standard</g:service><g:price>${sell >= threshold ? '0.00' : fee.toFixed(2)} INR</g:price></g:shipping>
+      ${(p.concerns || []).slice(0, 5).map((c, i) => `<g:custom_label_${i}>${escapeXml(c)}</g:custom_label_${i}>`).join('')}
+    </item>\n`;
+    };
+
+    let xml = '<?xml version="1.0" encoding="UTF-8"?>\n<rss version="2.0" xmlns:g="http://base.google.com/ns/1.0">\n  <channel>\n';
+    xml += `    <title>${escapeXml(settings.business?.brandName || 'Jayrup')} Products</title>\n    <link>${base}</link>\n    <description>${escapeXml(settings.defaultMetaDescription)}</description>\n`;
+    for (const p of products) {
+      if (p.variants?.length) {
+        p.variants.forEach((v) => {
+          xml += item(p, { id: v.sku, title: `${p.name} – ${v.title}`, price: v.price, salePrice: v.salePrice, stock: v.stock, gtin: v.barcode || p.barcode, groupId: p.sku, size: v.title, weight: v.weight || p.weight });
+        });
+      } else {
+        xml += item(p, { id: p.sku, title: `${p.name}${p.netQuantity ? ` ${p.netQuantity}` : ''}`, price: p.price, salePrice: p.salePrice, stock: p.stock, gtin: p.barcode, size: p.netQuantity, weight: p.weight });
+      }
+    }
+    xml += '  </channel>\n</rss>';
+
+    res.header('Content-Type', 'application/xml; charset=utf-8');
+    res.header('Cache-Control', 'public, max-age=3600');
+    return res.status(200).send(xml);
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Lookup redirect for a path (used by the SPA's 404 page)
+// @route   GET /api/v1/seo/redirects/lookup?url=/old-path
 export const lookupRedirect = async (req, res, next) => {
   try {
     const { url } = req.query;
-    if (!url) {
-      return res.status(400).json({ success: false, message: 'URL parameter required' });
-    }
+    if (!url) return res.status(400).json({ success: false, message: 'URL parameter required' });
+    const target = await resolveLegacyRedirect(String(url));
+    return res.status(200).json({ success: true, redirect: target ? { targetUrl: target, statusCode: 301 } : null });
+  } catch (error) {
+    next(error);
+  }
+};
 
-    const redirect = await Redirect.findOne({ sourceUrl: url.toLowerCase().trim() });
-    if (!redirect) {
-      return res.status(200).json({ success: true, redirect: null });
-    }
-
-    // Increment hit counter
-    await Redirect.findByIdAndUpdate(redirect._id, { $inc: { hits: 1 } });
-
-    return res.status(200).json({
+// @desc    All indexable routes (used by the frontend's build-time prerender script)
+// @route   GET /api/v1/seo/routes
+export const getSeoRoutes = async (req, res, next) => {
+  try {
+    const [products, categories, blogs] = await Promise.all([
+      Product.find({ status: 'ACTIVE' }).select('slug').lean(),
+      Category.find({ status: 'ACTIVE' }).select('slug').lean(),
+      Blog.find({ status: 'PUBLISHED' }).select('slug').lean(),
+    ]);
+    const manual = await Redirect.find().select('sourceUrl targetUrl').lean();
+    res.status(200).json({
       success: true,
-      redirect: {
-        targetUrl: redirect.targetUrl,
-        statusCode: redirect.statusCode,
+      data: {
+        routes: [
+          ...STATIC_SITEMAP_ROUTES.map((r) => r.url),
+          '/track-order',
+          ...categories.map((c) => `/category/${c.slug}`),
+          ...products.map((p) => `/products/${p.slug}`),
+          ...blogs.map((b) => `/blog/${b.slug}`),
+        ],
+        redirects: { ...LEGACY_REDIRECTS, ...Object.fromEntries(manual.map((m) => [m.sourceUrl, m.targetUrl])) },
       },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Render SEO head for one path
+// @route   GET /api/v1/seo/render?path=/products/xyz
+export const renderSeo = async (req, res, next) => {
+  try {
+    const seo = await buildSeoForPath(String(req.query.path || '/'));
+    const settings = await Setting.getStoreSettings();
+    res.status(200).json({
+      success: true,
+      data: { status: seo.status, redirect: seo.redirect || null, head: seo.redirect ? '' : renderHeadHtml(seo, settings), bodyHtml: seo.bodyHtml || '', title: seo.title },
     });
   } catch (error) {
     next(error);

@@ -47,3 +47,27 @@ export const paymentLimiter = rateLimit({
     message: 'Too many checkout or payment requests. Please try again after 15 minutes.',
   },
 });
+
+// Public order-tracking lookups (prevents order-number / phone enumeration)
+export const trackingLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    success: false,
+    message: 'Too many tracking requests. Please try again in a few minutes.',
+  },
+});
+
+// Password reset requests
+export const passwordResetLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 8,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    success: false,
+    message: 'Too many password reset requests. Please try again later.',
+  },
+});

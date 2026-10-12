@@ -1,6 +1,12 @@
 import jwt from 'jsonwebtoken';
 import { User } from '../models/User.js';
 
+export const jwtSecret = () => {
+  if (process.env.JWT_SECRET) return process.env.JWT_SECRET;
+  if (process.env.NODE_ENV === 'production') throw new Error('JWT_SECRET is not configured');
+  return 'jayrup_dev_only_secret_change_me';
+};
+
 export const protect = async (req, res, next) => {
   let token;
 
@@ -19,10 +25,7 @@ export const protect = async (req, res, next) => {
   }
 
   try {
-    const decoded = jwt.verify(
-      token,
-      process.env.JWT_SECRET || 'jayroop_royal_luxury_secret_key_2026_super_secure'
-    );
+    const decoded = jwt.verify(token, jwtSecret());
 
     const user = await User.findById(decoded.id).select('-password');
     if (!user) {
@@ -36,6 +39,14 @@ export const protect = async (req, res, next) => {
       return res.status(403).json({
         success: false,
         message: 'This account has been deactivated. Please contact support.',
+      });
+    }
+
+    // Tokens issued before a password change are no longer valid
+    if (user.passwordChangedAt && decoded.iat * 1000 < new Date(user.passwordChangedAt).getTime()) {
+      return res.status(401).json({
+        success: false,
+        message: 'Your password was changed recently. Please log in again.',
       });
     }
 
@@ -73,11 +84,9 @@ export const optionalAuth = async (req, res, next) => {
 
   if (token) {
     try {
-      const decoded = jwt.verify(
-        token,
-        process.env.JWT_SECRET || 'jayroop_royal_luxury_secret_key_2026_super_secure'
-      );
-      req.user = await User.findById(decoded.id).select('-password');
+      const decoded = jwt.verify(token, jwtSecret());
+      const user = await User.findById(decoded.id).select('-password');
+      if (user && user.isActive) req.user = user;
     } catch {
       // Ignore token failure for optional auth
     }

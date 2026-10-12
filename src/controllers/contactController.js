@@ -1,4 +1,6 @@
+import validator from 'validator';
 import { ContactInquiry } from '../models/ContactInquiry.js';
+import { sendMail } from '../services/mailer.js';
 
 // @desc    Submit a customer contact inquiry
 // @route   POST /api/v1/contact
@@ -13,19 +15,34 @@ export const submitContactInquiry = async (req, res, next) => {
         message: 'Name, email, and message are mandatory fields',
       });
     }
+    if (!validator.isEmail(String(email))) {
+      return res.status(400).json({ success: false, message: 'Please enter a valid email address' });
+    }
+    // Honeypot field – bots fill hidden inputs
+    if (req.body.website) {
+      return res.status(201).json({ success: true, message: 'Thank you!' });
+    }
 
     const inquiry = await ContactInquiry.create({
-      name,
-      email,
-      phone: phone || '',
-      orderNumber: orderNumber || '',
-      subject: subject || 'General Inquiry',
-      message,
+      name: String(name).trim().slice(0, 80),
+      email: String(email).trim().toLowerCase(),
+      phone: String(phone || '').slice(0, 20),
+      orderNumber: String(orderNumber || '').slice(0, 30),
+      subject: String(subject || 'General Inquiry').slice(0, 120),
+      message: String(message).slice(0, 3000),
     });
+
+    if (process.env.ADMIN_NOTIFY_EMAIL) {
+      sendMail({
+        to: process.env.ADMIN_NOTIFY_EMAIL,
+        subject: `📩 Website enquiry: ${inquiry.subject} – ${inquiry.name}`,
+        html: `<p><b>${inquiry.name}</b> (${inquiry.email}${inquiry.phone ? `, ${inquiry.phone}` : ''})${inquiry.orderNumber ? ` · Order ${inquiry.orderNumber}` : ''}</p><p style="white-space:pre-wrap">${validator.escape(inquiry.message)}</p>`,
+      }).catch(() => {});
+    }
 
     res.status(201).json({
       success: true,
-      message: 'Your inquiry has been received by our Royal Concierge. We will attend to your request promptly.',
+      message: 'Thank you! Your message has been received. Our support team will get back to you shortly.',
       data: {
         id: inquiry._id,
         createdAt: inquiry.createdAt,

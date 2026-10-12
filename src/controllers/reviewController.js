@@ -47,10 +47,10 @@ export const createReview = async (req, res, next) => {
   try {
     const { productId, rating, title, comment } = req.body;
 
-    if (!productId || !rating || !comment) {
+    if (!productId || !rating || !comment || String(comment).trim().length < 10) {
       return res.status(400).json({
         success: false,
-        message: 'Please provide product ID, rating (1-5), and review text',
+        message: 'Please provide a rating (1-5) and a review of at least 10 characters',
       });
     }
 
@@ -64,7 +64,8 @@ export const createReview = async (req, res, next) => {
       user: req.user._id,
       'items.product': productId,
       orderStatus: { $in: ['PAID', 'PROCESSING', 'SHIPPED', 'DELIVERED'] },
-    });
+    }).sort({ createdAt: -1 });
+    const safeRating = Math.min(5, Math.max(1, Math.round(Number(rating) || 0)));
 
     const verifiedPurchase = Boolean(completedOrder);
 
@@ -75,17 +76,19 @@ export const createReview = async (req, res, next) => {
     });
 
     if (existingReview) {
-      existingReview.rating = Number(rating);
-      existingReview.title = title || '';
-      existingReview.comment = comment;
+      existingReview.rating = safeRating;
+      existingReview.title = String(title || '').slice(0, 120);
+      existingReview.comment = String(comment).slice(0, 3000);
       existingReview.verifiedPurchase = verifiedPurchase;
+      // Edited reviews from non-buyers go back to moderation
+      if (!verifiedPurchase) existingReview.isApproved = false;
       await existingReview.save();
 
       await updateProductRatingStats(productId);
 
       return res.status(200).json({
         success: true,
-        message: 'Your review has been updated',
+        message: verifiedPurchase ? 'Your review has been updated' : 'Your review has been updated and will appear after moderation',
         data: existingReview,
       });
     }
@@ -94,18 +97,19 @@ export const createReview = async (req, res, next) => {
       product: productId,
       user: req.user._id,
       order: completedOrder ? completedOrder._id : null,
-      rating: Number(rating),
-      title: title || '',
-      comment,
+      rating: safeRating,
+      title: String(title || '').slice(0, 120),
+      comment: String(comment).slice(0, 3000),
       verifiedPurchase,
-      isApproved: true,
+      // Verified buyers are published instantly; other reviews wait for admin moderation (prevents fake reviews)
+      isApproved: verifiedPurchase,
     });
 
     await updateProductRatingStats(productId);
 
     res.status(201).json({
       success: true,
-      message: 'Thank you! Your review has been submitted.',
+      message: verifiedPurchase ? 'Thank you! Your review is live.' : 'Thank you! Your review will appear after moderation.',
       data: review,
     });
   } catch (error) {

@@ -66,6 +66,7 @@ const couponSchema = new mongoose.Schema(
 couponSchema.methods.isValid = function (orderSubtotal) {
   const now = new Date();
   if (this.status !== 'ACTIVE') return { valid: false, message: 'Coupon is inactive' };
+  if (this.startDate && now < this.startDate) return { valid: false, message: 'Coupon is not active yet' };
   if (now > this.expiryDate) return { valid: false, message: 'Coupon has expired' };
   if (this.usageLimit && this.timesUsed >= this.usageLimit)
     return { valid: false, message: 'Coupon usage limit reached' };

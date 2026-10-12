@@ -13,10 +13,7 @@ const contactInquirySchema = new mongoose.Schema(
       required: [true, 'Please provide your email address'],
       trim: true,
       lowercase: true,
-      match: [
-        /^\w+([.-]?\w+)*@\w+([.-]?\w+)*(\.\w{2,3})+$/,
-        'Please provide a valid email address',
-      ],
+      match: [/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/, 'Please provide a valid email address'],
     },
     phone: {
       type: String,
@@ -38,6 +35,8 @@ const contactInquirySchema = new mongoose.Schema(
         'Wholesale & Corporate Gifting',
         'Return & Replacement Request',
         'Grievance & Feedback',
+        'Complaint',
+        'Payment Issue',
         'General Inquiry',
       ],
       default: 'General Inquiry',

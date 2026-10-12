@@ -15,7 +15,7 @@ export const validateCoupon = async (req, res, next) => {
       });
     }
 
-    const coupon = await Coupon.findOne({ code: code.toUpperCase() });
+    const coupon = await Coupon.findOne({ code: String(code).trim().toUpperCase() });
     if (!coupon) {
       return res.status(404).json({
         success: false,
@@ -23,7 +23,7 @@ export const validateCoupon = async (req, res, next) => {
       });
     }
 
-    const check = coupon.isValid(subtotal);
+    const check = coupon.isValid(Number(subtotal) || 0);
     if (!check.valid) {
       return res.status(400).json({
         success: false,
@@ -31,7 +31,7 @@ export const validateCoupon = async (req, res, next) => {
       });
     }
 
-    const discountAmount = coupon.calculateDiscount(subtotal);
+    const discountAmount = coupon.calculateDiscount(Number(subtotal) || 0);
 
     res.status(200).json({
       success: true,
@@ -79,7 +79,16 @@ export const createCoupon = async (req, res, next) => {
       status,
     } = req.body;
 
-    const existing = await Coupon.findOne({ code: code.toUpperCase() });
+    if (!code || !/^[A-Z0-9_-]{3,20}$/i.test(String(code).trim())) {
+      return res.status(400).json({ success: false, message: 'Coupon code must be 3–20 letters/numbers.' });
+    }
+    if (!['PERCENTAGE', 'FIXED'].includes(discountType) || !(Number(discountValue) > 0)) {
+      return res.status(400).json({ success: false, message: 'Please provide a valid discount type and value.' });
+    }
+    if (discountType === 'PERCENTAGE' && Number(discountValue) > 90) {
+      return res.status(400).json({ success: false, message: 'Percentage discount cannot exceed 90%.' });
+    }
+    const existing = await Coupon.findOne({ code: String(code).trim().toUpperCase() });
     if (existing) {
       return res.status(400).json({
         success: false,
@@ -88,13 +97,15 @@ export const createCoupon = async (req, res, next) => {
     }
 
     const coupon = await Coupon.create({
-      code: code.toUpperCase(),
+      code: String(code).trim().toUpperCase(),
       discountType,
       discountValue: Number(discountValue),
       minimumOrder: Number(minimumOrder || 0),
       maximumDiscount: maximumDiscount ? Number(maximumDiscount) : null,
+      startDate: req.body.startDate ? new Date(req.body.startDate) : new Date(),
       expiryDate: new Date(expiryDate),
       usageLimit: usageLimit ? Number(usageLimit) : null,
+      perUserLimit: req.body.perUserLimit !== undefined ? Math.max(0, Number(req.body.perUserLimit) || 0) : 1,
       status: status || 'ACTIVE',
     });
 
@@ -126,9 +137,17 @@ export const updateCoupon = async (req, res, next) => {
       return res.status(404).json({ success: false, message: 'Coupon not found' });
     }
 
-    if (req.body.code) req.body.code = req.body.code.toUpperCase();
+    const allowed = ['code', 'discountType', 'discountValue', 'minimumOrder', 'maximumDiscount', 'startDate', 'expiryDate', 'usageLimit', 'perUserLimit', 'status'];
+    const update = {};
+    allowed.forEach((k) => {
+      if (req.body[k] !== undefined) update[k] = req.body[k];
+    });
+    if (update.code) update.code = String(update.code).trim().toUpperCase();
+    if (update.discountType === 'PERCENTAGE' && Number(update.discountValue) > 90) {
+      return res.status(400).json({ success: false, message: 'Percentage discount cannot exceed 90%.' });
+    }
 
-    const updated = await Coupon.findByIdAndUpdate(req.params.id, req.body, {
+    const updated = await Coupon.findByIdAndUpdate(req.params.id, update, {
       new: true,
       runValidators: true,
     });
@@ -138,7 +157,7 @@ export const updateCoupon = async (req, res, next) => {
       action: 'COUPON_UPDATED',
       resource: 'Coupon',
       resourceId: updated._id.toString(),
-      details: req.body,
+      details: update,
     });
 
     res.status(200).json({

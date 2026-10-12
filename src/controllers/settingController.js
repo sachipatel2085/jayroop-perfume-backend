@@ -1,26 +1,63 @@
 import { Setting } from '../models/Setting.js';
 import { logAdminAction } from '../utils/auditLogger.js';
+import { publicGatewayInfo } from '../services/phonepe.js';
+import { isValidGSTIN } from '../utils/helpers.js';
+import { stateCodeOf, INDIA_STATES } from '../utils/indiaStates.js';
 
-// @desc    Get public store settings (for Storefront & Checkout)
+const pick = (obj = {}, keys = []) => Object.fromEntries(keys.filter((k) => obj[k] !== undefined).map((k) => [k, obj[k]]));
+
+// @desc    Public store settings (storefront, checkout, footer, schema.org)
 // @route   GET /api/v1/settings/public
 // @access  Public
 export const getPublicSettings = async (req, res, next) => {
   try {
-    const settings = await Setting.getStoreSettings();
-
+    const s = await Setting.getStoreSettings();
+    const gateway = publicGatewayInfo();
+    const b = s.business || {};
+    res.set('Cache-Control', 'public, max-age=120');
     res.status(200).json({
       success: true,
       data: {
-        codEnabled: settings.codEnabled,
-        codExtraFee: settings.codExtraFee || 0,
-        codMinOrderAmount: settings.codMinOrderAmount || 0,
-        codMaxOrderAmount: settings.codMaxOrderAmount || 50000,
-        onlinePaymentEnabled: settings.onlinePaymentEnabled !== false,
-        defaultMetaTitle: settings.defaultMetaTitle || 'Jayrup (JR) | Royal Luxury Fragrance & Skincare House',
-        defaultMetaDescription: settings.defaultMetaDescription || '',
-        defaultMetaKeywords: settings.defaultMetaKeywords || '',
-        googleSiteVerification: settings.googleSiteVerification || '',
-        ogDefaultImage: settings.ogDefaultImage || '',
+        codEnabled: s.codEnabled,
+        codExtraFee: s.codExtraFee || 0,
+        codMinOrderAmount: s.codMinOrderAmount || 0,
+        codMaxOrderAmount: s.codMaxOrderAmount || 0,
+        onlinePaymentEnabled: s.onlinePaymentEnabled !== false && gateway.configured,
+        paymentGateway: 'PHONEPE',
+        gatewayEnvironment: gateway.environment,
+        freeShippingThreshold: s.freeShippingThreshold ?? 999,
+        flatShippingFee: s.flatShippingFee ?? 100,
+        estimatedDeliveryText: s.estimatedDeliveryText,
+        business: {
+          brandName: b.brandName,
+          tradeName: b.tradeName,
+          legalName: b.legalName,
+          registrationNote: b.registrationNote,
+          gstin: b.gstin,
+          addressLine1: b.addressLine1,
+          addressLine2: b.addressLine2,
+          city: b.city,
+          district: b.district,
+          state: b.state,
+          postalCode: b.postalCode,
+          country: b.country,
+          phone: b.phone,
+          whatsapp: b.whatsapp,
+          email: b.email,
+          website: b.website,
+          instagram: b.instagram,
+          facebook: b.facebook,
+          youtube: b.youtube,
+        },
+        defaultMetaTitle: s.defaultMetaTitle,
+        defaultMetaDescription: s.defaultMetaDescription || '',
+        defaultMetaKeywords: s.defaultMetaKeywords || '',
+        googleSiteVerification: s.googleSiteVerification || '',
+        bingSiteVerification: s.bingSiteVerification || '',
+        googleAnalyticsId: s.googleAnalyticsId || '',
+        metaPixelId: s.metaPixelId || '',
+        ogDefaultImage: s.ogDefaultImage || '',
+        states: INDIA_STATES.map((st) => st.name),
       },
     });
   } catch (error) {
@@ -28,55 +65,74 @@ export const getPublicSettings = async (req, res, next) => {
   }
 };
 
-// @desc    Admin: Get all store configuration settings
+// @desc    Admin: all settings (+ gateway status, never secrets)
 // @route   GET /api/v1/settings
-// @access  Private/Admin
 export const getAdminSettings = async (req, res, next) => {
   try {
     const settings = await Setting.getStoreSettings();
-
-    res.status(200).json({
-      success: true,
-      data: settings,
-    });
+    res.status(200).json({ success: true, data: { ...settings.toObject(), gateway: publicGatewayInfo() } });
   } catch (error) {
     next(error);
   }
 };
 
-// @desc    Admin: Update store settings (COD on/off, fees, online payment, SEO)
+// @desc    Admin: update settings (payments, shipping, business/GST, invoice, SEO)
 // @route   PUT /api/v1/settings
-// @access  Private/Admin
 export const updateSettings = async (req, res, next) => {
   try {
-    const {
-      codEnabled,
-      codExtraFee,
-      codMinOrderAmount,
-      codMaxOrderAmount,
-      onlinePaymentEnabled,
-      defaultMetaTitle,
-      defaultMetaDescription,
-      defaultMetaKeywords,
-      googleSiteVerification,
-      ogDefaultImage,
-    } = req.body;
-
+    const body = req.body || {};
     const settings = await Setting.getStoreSettings();
-
     const previousCodStatus = settings.codEnabled;
 
-    if (codEnabled !== undefined) settings.codEnabled = Boolean(codEnabled);
-    if (codExtraFee !== undefined) settings.codExtraFee = Math.max(0, Number(codExtraFee) || 0);
-    if (codMinOrderAmount !== undefined) settings.codMinOrderAmount = Math.max(0, Number(codMinOrderAmount) || 0);
-    if (codMaxOrderAmount !== undefined) settings.codMaxOrderAmount = Math.max(0, Number(codMaxOrderAmount) || 0);
-    if (onlinePaymentEnabled !== undefined) settings.onlinePaymentEnabled = Boolean(onlinePaymentEnabled);
+    const num = (v, min = 0) => Math.max(min, Number(v) || 0);
+    if (body.codEnabled !== undefined) settings.codEnabled = Boolean(body.codEnabled);
+    if (body.codExtraFee !== undefined) settings.codExtraFee = num(body.codExtraFee);
+    if (body.codMinOrderAmount !== undefined) settings.codMinOrderAmount = num(body.codMinOrderAmount);
+    if (body.codMaxOrderAmount !== undefined) settings.codMaxOrderAmount = num(body.codMaxOrderAmount);
+    if (body.onlinePaymentEnabled !== undefined) settings.onlinePaymentEnabled = Boolean(body.onlinePaymentEnabled);
+    if (body.freeShippingThreshold !== undefined) settings.freeShippingThreshold = num(body.freeShippingThreshold);
+    if (body.flatShippingFee !== undefined) settings.flatShippingFee = num(body.flatShippingFee);
+    if (body.estimatedDeliveryText !== undefined) settings.estimatedDeliveryText = String(body.estimatedDeliveryText).slice(0, 80);
 
-    if (defaultMetaTitle !== undefined) settings.defaultMetaTitle = defaultMetaTitle.trim();
-    if (defaultMetaDescription !== undefined) settings.defaultMetaDescription = defaultMetaDescription.trim();
-    if (defaultMetaKeywords !== undefined) settings.defaultMetaKeywords = defaultMetaKeywords.trim();
-    if (googleSiteVerification !== undefined) settings.googleSiteVerification = googleSiteVerification.trim();
-    if (ogDefaultImage !== undefined) settings.ogDefaultImage = ogDefaultImage.trim();
+    const strKeys = ['defaultMetaTitle', 'defaultMetaDescription', 'defaultMetaKeywords', 'googleSiteVerification', 'bingSiteVerification', 'googleAnalyticsId', 'metaPixelId', 'ogDefaultImage'];
+    strKeys.forEach((k) => {
+      if (body[k] !== undefined) settings[k] = String(body[k] || '').trim();
+    });
+
+    if (body.business && typeof body.business === 'object') {
+      const b = pick(body.business, [
+        'brandName', 'tradeName', 'legalName', 'registrationNote', 'gstin', 'pan', 'udyamNumber', 'addressLine1', 'addressLine2',
+        'city', 'district', 'state', 'postalCode', 'country', 'phone', 'whatsapp', 'email', 'website', 'instagram', 'facebook', 'youtube',
+      ]);
+      if (b.gstin && !isValidGSTIN(b.gstin)) {
+        return res.status(400).json({ success: false, message: 'Invalid GSTIN format (e.g. 24ABCDE1234F1Z5).' });
+      }
+      Object.entries(b).forEach(([k, v]) => {
+        settings.business[k] = String(v ?? '').trim();
+      });
+      settings.business.stateCode = stateCodeOf(settings.business.state) || settings.business.stateCode;
+      if (settings.business.gstin && settings.business.stateCode && settings.business.gstin.slice(0, 2) !== settings.business.stateCode) {
+        return res.status(400).json({ success: false, message: `GSTIN state code (${settings.business.gstin.slice(0, 2)}) does not match business state (${settings.business.state} – ${settings.business.stateCode}).` });
+      }
+      settings.markModified('business');
+    }
+
+    if (body.invoice && typeof body.invoice === 'object') {
+      const inv = pick(body.invoice, [
+        'prefix', 'creditNotePrefix', 'pricesIncludeTax', 'defaultHsnCode', 'defaultGstRate', 'shippingGstRate', 'shippingSacCode',
+        'termsText', 'footerNote', 'signatoryName', 'autoGenerateForCodOn',
+      ]);
+      ['defaultGstRate', 'shippingGstRate'].forEach((k) => {
+        if (inv[k] !== undefined) inv[k] = Math.min(28, num(inv[k]));
+      });
+      if (inv.prefix !== undefined) inv.prefix = String(inv.prefix).replace(/[^A-Z0-9]/gi, '').toUpperCase().slice(0, 6) || 'JR';
+      if (inv.creditNotePrefix !== undefined) inv.creditNotePrefix = String(inv.creditNotePrefix).replace(/[^A-Z0-9]/gi, '').toUpperCase().slice(0, 6) || 'CN';
+      if (inv.pricesIncludeTax !== undefined) inv.pricesIncludeTax = true; // storefront prices are always MRP (tax inclusive)
+      Object.entries(inv).forEach(([k, v]) => {
+        settings.invoice[k] = v;
+      });
+      settings.markModified('invoice');
+    }
 
     await settings.save();
 
@@ -87,16 +143,16 @@ export const updateSettings = async (req, res, next) => {
       resourceId: settings._id.toString(),
       details: {
         codEnabled: settings.codEnabled,
-        codExtraFee: settings.codExtraFee,
         previousCodStatus,
         onlinePaymentEnabled: settings.onlinePaymentEnabled,
+        sections: Object.keys(body),
       },
     });
 
     res.status(200).json({
       success: true,
-      message: `Store settings updated. Cash on Delivery is now ${settings.codEnabled ? 'ENABLED' : 'DISABLED'}.`,
-      data: settings,
+      message: 'Store settings saved.',
+      data: { ...settings.toObject(), gateway: publicGatewayInfo() },
     });
   } catch (error) {
     next(error);
