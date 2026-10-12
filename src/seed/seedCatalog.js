@@ -1,17 +1,21 @@
 /**
- * Jayrup catalogue seeder – replaces ALL products & categories with the catalogue in ./data/catalogData.js
+ * Jayrup catalogue tool – products & categories only (orders, invoices, customers are never touched).
  *
- *   npm run seed:catalog                 → DRY RUN: shows what will be backed up / deleted / created
- *   npm run seed:catalog -- --yes        → backup → delete old catalogue → create new catalogue
- *   npm run seed:catalog -- --restore backups/catalog-2026-10-12T12-00-00.json --yes
- *                                        → put a backed-up catalogue back exactly as it was
+ * Use these npm commands (they work the same in PowerShell, CMD and bash):
+ *
+ *   npm run catalog:preview   → shows what is in the database and what would change (changes nothing)
+ *   npm run catalog:wipe      → backup, then DELETE ALL products + categories (+ their reviews)
+ *   npm run catalog:add       → add / update ONLY the products + categories in ./data/catalogData.js
+ *   npm run catalog:reset     → wipe + add in one go
+ *   npm run catalog:restore -- backups/catalog-<date>.json  → put a backup back
+ *
+ * Same thing with node directly:  node src/seed/seedCatalog.js --wipe --yes   (or --add / --reset)
  *
  * Safety:
  *  • Before anything is deleted, the old products, categories, reviews, hero banners and redirects are
  *    saved to   jayroop-perfume-backend/backups/catalog-<date>.json   AND to the "catalogbackups"
  *    collection in MongoDB.
- *  • Orders, invoices, customers, coupons, blogs and settings are NEVER touched (orders keep their own
- *    product snapshots, so old invoices and reports stay correct).
+ *  • Orders keep their own product snapshots, so old invoices and reports stay correct.
  *  • Old product / category URLs get 301 redirects to the closest new page, so Google rankings and old
  *    links keep working.
  */
@@ -37,6 +41,8 @@ const args = process.argv.slice(2);
 const CONFIRMED = args.includes('--yes');
 const restoreIdx = args.indexOf('--restore');
 const RESTORE_FILE = restoreIdx >= 0 ? args[restoreIdx + 1] : null;
+// --wipe = delete only · --add = create only · --reset (or no flag) = wipe + add
+const MODE = args.includes('--wipe') ? 'wipe' : args.includes('--add') ? 'add' : 'reset';
 
 const log = (...a) => console.log(...a);
 const stamp = () => new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
@@ -112,72 +118,78 @@ const restore = async (file) => {
   log('  ✓ Restored. Rebuild the storefront (npm run build) so sitemap & product pages update.\n');
 };
 
-// ───────────────────────────── seed ─────────────────────────────
-const seed = async () => {
-  validateCatalog();
-
+// ───────────────────────────── wipe ─────────────────────────────
+const loadOld = async () => {
   const [oldProducts, oldCategories] = await Promise.all([
-    Product.find().select('name slug productType hsnCode category').populate('category', 'name slug productType').lean(),
+    Product.find().select('name slug status productType hsnCode category').populate('category', 'name slug productType').lean(),
     Category.find().select('name slug productType').lean(),
   ]);
   const reviewCount = await Review.countDocuments({ product: { $in: oldProducts.map((p) => p._id) } });
+  return { oldProducts, oldCategories, reviewCount };
+};
 
-  log('\n━━━━━━━━━━━━ Jayrup catalogue seed ━━━━━━━━━━━━');
-  log(`Will BACK UP and DELETE: ${oldProducts.length} products, ${oldCategories.length} categories, ${reviewCount} reviews of those products`);
-  oldProducts.forEach((p) => log(`   – ${p.name}  (/products/${p.slug})`));
-  log(`Will CREATE: ${CATEGORIES.length} categories, ${PRODUCTS.length} products`);
-  CATEGORIES.forEach((c) => log(`   + category  ${c.name}  (/category/${c.slug}) · ${c.productType} · HSN ${c.hsnCode} · GST ${c.gstRate}%`));
-  PRODUCTS.forEach((p) => log(`   + product   ${p.name}  (/products/${p.slug}) · MRP ₹${p.price} · stock ${p.stock}`));
-  log('Never touched: orders, invoices, customers, coupons, blogs, settings.');
-
-  if (!CONFIRMED) {
-    log('\nDRY RUN – nothing changed. Run again with  --yes  to apply:\n   npm run seed:catalog -- --yes\n');
-    return;
-  }
-
-  // 1) Backup
+const wipe = async ({ oldProducts }) => {
   const { file } = await takeBackup();
   log(`\n✓ Backup saved → ${path.relative(process.cwd(), file)} (and in MongoDB collection "catalogbackups")`);
 
-  // 2) Delete old catalogue (+ dangling references)
   const oldIds = oldProducts.map((p) => p._id);
-  await Review.deleteMany({ product: { $in: oldIds } });
+  const reviews = await Review.deleteMany({ product: { $in: oldIds } });
   await InfluencerVideo.updateMany({ taggedProduct: { $in: oldIds } }, { $set: { taggedProduct: null } });
   await User.updateMany({ wishlist: { $in: oldIds } }, { $pull: { wishlist: { $in: oldIds } } });
-  await Product.deleteMany({});
-  await Category.deleteMany({});
-  log('✓ Old products, categories and their reviews removed');
+  const products = await Product.deleteMany({});
+  const categories = await Category.deleteMany({});
+  log(`✓ Deleted ${products.deletedCount} products, ${categories.deletedCount} categories, ${reviews.deletedCount} reviews`);
 
-  // 3) Create categories
+  // Old URLs → closest live page (/shop until new products exist; `add` re-points them later)
+  let redirects = 0;
+  for (const p of oldProducts) {
+    await Redirect.registerRedirect(`/products/${p.slug}`, '/shop', 'PRODUCT');
+    redirects += 1;
+  }
+  return { redirects, file };
+};
+
+// ───────────────────────────── add ─────────────────────────────
+const add = async ({ oldProducts = [], oldCategories = [] } = {}) => {
+  validateCatalog();
+
+  // Categories – created, or updated in place if the slug already exists
   const catByKey = {};
   for (const c of CATEGORIES) {
     const { key, ...data } = c;
-    const doc = await Category.create({ ...data, parent: null });
+    const exists = await Category.exists({ slug: data.slug });
+    const doc = await Category.findOneAndUpdate({ slug: data.slug }, { $set: { ...data, parent: null } }, { upsert: true, new: true, runValidators: true, setDefaultsOnInsert: true });
     catByKey[key] = doc;
-    log(`✓ Category  ${doc.name}`);
+    log(`✓ Category  ${doc.name}  → /category/${doc.slug}${exists ? '  (updated)' : ''}`);
   }
 
-  // 4) Create products (Product.create runs all schema validation)
+  // Products – created, or updated in place if the slug or SKU already exists (stock/sales are kept)
   const created = [];
   for (const p of PRODUCTS) {
     const { categoryKey, ...data } = p;
-    const doc = await Product.create({
+    const payload = {
       ...data,
       category: catByKey[categoryKey]._id,
       subCategory: null,
       images: data.images.map((img, i) => ({ url: img.url, publicId: '', altText: img.altText, isPrimary: i === 0 })),
-      averageRating: 0,
-      numReviews: 0,
-      totalSold: 0,
-    });
+    };
+    const existing = await Product.findOne({ $or: [{ slug: data.slug }, { sku: data.sku }] });
+    let doc;
+    if (existing) {
+      const { stock, ...rest } = payload; // keep the real stock level you set in the admin
+      existing.set(rest);
+      doc = await existing.save();
+      log(`✓ Product   ${doc.name}  → /products/${doc.slug}  (updated – stock kept at ${doc.stock})`);
+    } else {
+      doc = await Product.create({ ...payload, averageRating: 0, numReviews: 0, totalSold: 0 });
+      log(`✓ Product   ${doc.name}  → /products/${doc.slug}`);
+    }
     created.push(doc);
-    log(`✓ Product   ${doc.name}  → /products/${doc.slug}`);
   }
 
-  // 5) Redirects – make sure new URLs are never redirected away, and send old URLs to the closest new page
+  // Redirects – live URLs are never redirected away; old URLs point to the closest new page
   const liveUrls = [...created.map((p) => `/products/${p.slug}`), ...Object.values(catByKey).map((c) => `/category/${c.slug}`)];
   await Redirect.deleteMany({ sourceUrl: { $in: liveUrls } });
-
   const typeTarget = (type) => {
     const match = created.find((p) => p.productType === type) || (type === 'SKINCARE' ? created.find((p) => p.productType === 'AYURVEDIC') : null);
     return match ? `/products/${match.slug}` : '/shop';
@@ -186,8 +198,7 @@ const seed = async () => {
   for (const p of oldProducts) {
     const src = `/products/${p.slug}`;
     if (liveUrls.includes(src)) continue;
-    const type = inferProductType(p, p.category);
-    await Redirect.registerRedirect(src, typeTarget(type), 'PRODUCT');
+    await Redirect.registerRedirect(src, typeTarget(inferProductType(p, p.category)), 'PRODUCT');
     redirects += 1;
   }
   for (const c of oldCategories) {
@@ -198,14 +209,58 @@ const seed = async () => {
     await Redirect.registerRedirect(src, cat ? `/category/${cat.slug}` : '/shop', 'CATEGORY');
     redirects += 1;
   }
-  log(`✓ ${redirects} old URLs now 301-redirect to the new pages`);
+  // Redirects left by an earlier `wipe` (old product → /shop) are re-pointed to the best new product
+  const parked = await Redirect.find({ entityType: 'PRODUCT', targetUrl: '/shop' }).lean();
+  for (const r of parked) {
+    if (liveUrls.includes(r.sourceUrl)) continue;
+    const type = inferProductType({ name: r.sourceUrl.replace(/[-/]/g, ' ') }, null);
+    const target = typeTarget(type);
+    if (target !== '/shop') {
+      await Redirect.updateOne({ _id: r._id }, { $set: { targetUrl: target } });
+      redirects += 1;
+    }
+  }
+  if (redirects) log(`✓ ${redirects} old URLs now 301-redirect to the new pages`);
 
-  // 6) Homepage hero banner (responsive artwork shipped with the storefront)
-  await Advertisement.updateMany({ location: 'HOMEPAGE_HERO' }, { $set: { status: 'INACTIVE' } });
+  // Homepage hero banner
+  await Advertisement.updateMany({ location: 'HOMEPAGE_HERO', title: { $ne: HERO_AD.title } }, { $set: { status: 'INACTIVE' } });
   await Advertisement.findOneAndUpdate({ location: 'HOMEPAGE_HERO', title: HERO_AD.title }, { $set: HERO_AD }, { upsert: true, new: true, runValidators: true });
   log('✓ Homepage hero set to the Royal Flora campaign (older hero banners kept, set to INACTIVE)');
+};
 
-  log('\nDone. Next: open Admin › Products to check prices & stock, then rebuild the storefront (npm run build).\n');
+// ───────────────────────────── main flow ─────────────────────────────
+const seed = async () => {
+  const old = await loadOld();
+  const { oldProducts, oldCategories, reviewCount } = old;
+  const title = { wipe: 'DELETE ALL products & categories', add: 'ADD the new catalogue', reset: 'DELETE ALL, then ADD the new catalogue' }[MODE];
+
+  log(`\n━━━━━━━━━━━━ Jayrup catalogue – ${title} ━━━━━━━━━━━━`);
+  log(`In the database now: ${oldProducts.length} products, ${oldCategories.length} categories`);
+  oldProducts.forEach((p) => log(`   • ${p.name}  (/products/${p.slug})${p.status !== 'ACTIVE' ? `  [${p.status}]` : ''}`));
+  oldCategories.forEach((c) => log(`   • category ${c.name}  (/category/${c.slug})`));
+  if (MODE !== 'add') log(`Will BACK UP and DELETE: ${oldProducts.length} products, ${oldCategories.length} categories, ${reviewCount} reviews of those products`);
+  if (MODE !== 'wipe') {
+    log(`Will ADD: ${CATEGORIES.length} categories, ${PRODUCTS.length} products`);
+    CATEGORIES.forEach((c) => log(`   + category  ${c.name}  (/category/${c.slug}) · ${c.productType} · HSN ${c.hsnCode} · GST ${c.gstRate}%`));
+    PRODUCTS.forEach((p) => log(`   + product   ${p.name}  (/products/${p.slug}) · MRP ₹${p.price} · stock ${p.stock}`));
+  }
+  log('Never touched: orders, invoices, customers, coupons, blogs, settings.');
+
+  if (!CONFIRMED) {
+    log('\nPREVIEW ONLY – nothing changed. To apply, run one of:');
+    log('   npm run catalog:wipe     (delete all products + categories)');
+    log('   npm run catalog:add      (add the 2 new products + categories)');
+    log('   npm run catalog:reset    (both in one go)\n');
+    return;
+  }
+
+  if (MODE === 'wipe' || MODE === 'reset') await wipe(old);
+  if (MODE === 'add' || MODE === 'reset') await add(old);
+
+  const [p, c] = await Promise.all([Product.countDocuments(), Category.countDocuments()]);
+  log(`\nDone. Database now has ${p} products and ${c} categories.`);
+  if (MODE === 'wipe') log('Next: npm run catalog:add\n');
+  else log('Next: open Admin › Products to check prices & stock, then rebuild the storefront (npm run build).\n');
 };
 
 // ───────────────────────────── run ─────────────────────────────

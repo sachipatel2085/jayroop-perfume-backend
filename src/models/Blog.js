@@ -33,8 +33,18 @@ const blogSchema = new mongoose.Schema(
     },
     author: {
       type: String,
-      default: 'Jayrup Editorial House',
+      default: 'Jayrup Editorial Team',
     },
+    // Shown under the article and published as FAQPage structured data
+    faqs: [
+      {
+        _id: false,
+        question: { type: String, trim: true, maxlength: 300 },
+        answer: { type: String, trim: true, maxlength: 3000 },
+      },
+    ],
+    // Products this article is about – shown as "Shop the products" cards under the article
+    relatedProductSlugs: [{ type: String, trim: true, lowercase: true }],
     category: {
       type: String,
       default: 'Fragrance & Skincare',

@@ -4,6 +4,7 @@ import { Blog } from '../models/Blog.js';
 import { Review } from '../models/Review.js';
 import { Setting } from '../models/Setting.js';
 import { Redirect } from '../models/Redirect.js';
+import { HOME_FAQS } from './homeContent.js';
 import { typeOf, inferProductType, isReturnable, isHazmat } from '../config/productTypes.js';
 
 /**
@@ -386,13 +387,25 @@ export const buildSeoForPath = async (rawPath = '/') => {
       : null;
 
     if (path === '/') {
+      const latest = await Blog.find({ status: 'PUBLISHED' }).select('title slug').sort({ publishedAt: -1 }).limit(3).lean();
       return {
         ...base,
         jsonLd: [
           { id: 'organization-schema-jsonld', data: organizationSchema(settings) },
           { id: 'website-schema-jsonld', data: websiteSchema(settings) },
+          ...(itemList ? [{ id: 'home-products-schema-jsonld', data: { ...itemList, name: `${brand} bestsellers` } }] : []),
+          {
+            id: 'faq-schema-jsonld',
+            data: {
+              '@context': 'https://schema.org',
+              '@type': 'FAQPage',
+              mainEntity: HOME_FAQS.map((f) => ({ '@type': 'Question', name: f.question, acceptedAnswer: { '@type': 'Answer', text: f.answer } })),
+            },
+          },
         ],
-        bodyHtml: `<h1>${esc(brand)}${settings.business?.tagline ? ` – ${esc(settings.business.tagline)}` : ''}</h1><p>${esc(settings.defaultMetaDescription)}</p>${links}`,
+        bodyHtml: `<h1>${esc(brand)} – Luxury Perfume for Men &amp; Ayurvedic Pimple Cream</h1><p>${esc(settings.defaultMetaDescription)}</p>${links}${
+          latest.length ? `<h2>From the Jayrup Journal</h2><ul>${latest.map((b) => `<li><a href="/blog/${esc(b.slug)}">${esc(b.title)}</a></li>`).join('')}</ul>` : ''
+        }<h2>Frequently asked questions</h2>${HOME_FAQS.map((f) => `<h3>${esc(f.question)}</h3><p>${esc(f.answer)}</p>`).join('')}`,
       };
     }
     const s = STATIC['/shop'];
@@ -473,6 +486,9 @@ export const buildSeoForPath = async (rawPath = '/') => {
     const cat = await Category.findOne({ slug: m[1], status: 'ACTIVE' }).lean();
     if (!cat) return { ...base, status: 404, title: 'Category not found | Jayrup', robots: 'noindex, follow' };
     const products = await Product.find({ category: cat._id, status: 'ACTIVE' }).select('name slug price salePrice images').limit(30).lean();
+    const pageUrl = `${siteUrl()}/category/${cat.slug}`;
+    const intro = cat.intro || truncate(stripHtml(cat.description || ''), 300);
+    const faqs = (cat.faqs || []).filter((f) => f.question && f.answer);
     const crumbs = [
       { name: 'Home', url: '/' },
       { name: 'Shop', url: '/shop' },
@@ -481,9 +497,9 @@ export const buildSeoForPath = async (rawPath = '/') => {
     return {
       ...base,
       title: cat.seo?.metaTitle || `${cat.name} – Buy ${cat.name} Online in India | Jayrup`,
-      description: cat.seo?.metaDescription || truncate(cat.description || `Shop ${cat.name} by Jayrup online. Genuine products, secure PhonePe & COD checkout and delivery across India.`, 158),
+      description: cat.seo?.metaDescription || truncate(intro || `Shop ${cat.name} by Jayrup online. Genuine products, secure PhonePe & COD checkout and delivery across India.`, 158),
       keywords: cat.seo?.metaKeywords || base.keywords,
-      canonical: cat.seo?.canonicalUrl ? abs(cat.seo.canonicalUrl) : `${siteUrl()}/category/${cat.slug}`,
+      canonical: cat.seo?.canonicalUrl ? abs(cat.seo.canonicalUrl) : pageUrl,
       image: abs(cat.image?.url),
       jsonLd: [
         { id: 'breadcrumb-schema-jsonld', data: breadcrumbSchema(crumbs) },
@@ -492,17 +508,43 @@ export const buildSeoForPath = async (rawPath = '/') => {
           data: {
             '@context': 'https://schema.org',
             '@type': 'CollectionPage',
+            '@id': `${pageUrl}#collection`,
             name: cat.name,
-            url: `${siteUrl()}/category/${cat.slug}`,
-            description: truncate(cat.description || '', 300),
+            headline: cat.seo?.metaTitle || cat.name,
+            url: pageUrl,
+            description: truncate(intro || stripHtml(cat.description || ''), 300),
+            inLanguage: 'en-IN',
+            ...(cat.image?.url ? { primaryImageOfPage: { '@type': 'ImageObject', url: abs(cat.image.url), caption: cat.image.altText || cat.name } } : {}),
+            isPartOf: { '@type': 'WebSite', name: 'Jayrup', url: siteUrl() },
             mainEntity: {
               '@type': 'ItemList',
-              itemListElement: products.map((p, i) => ({ '@type': 'ListItem', position: i + 1, url: `${siteUrl()}/products/${p.slug}`, name: p.name })),
+              numberOfItems: products.length,
+              itemListElement: products.map((p, i) => ({
+                '@type': 'ListItem',
+                position: i + 1,
+                url: `${siteUrl()}/products/${p.slug}`,
+                name: p.name,
+                ...(p.images?.[0]?.url ? { image: abs(p.images[0].url) } : {}),
+              })),
             },
           },
         },
+        ...(faqs.length
+          ? [
+              {
+                id: 'faq-schema-jsonld',
+                data: {
+                  '@context': 'https://schema.org',
+                  '@type': 'FAQPage',
+                  mainEntity: faqs.map((f) => ({ '@type': 'Question', name: stripHtml(f.question), acceptedAnswer: { '@type': 'Answer', text: stripHtml(f.answer) } })),
+                },
+              },
+            ]
+          : []),
       ],
-      bodyHtml: `<h1>${esc(cat.name)}</h1><p>${esc(stripHtml(cat.description || ''))}</p><ul>${products.map((p) => `<li><a href="/products/${esc(p.slug)}">${esc(p.name)}</a> – ₹${effectivePrice(p)}</li>`).join('')}</ul>`,
+      bodyHtml: `<h1>${esc(cat.name)}</h1><p>${esc(intro)}</p><ul>${products.map((p) => `<li><a href="/products/${esc(p.slug)}">${esc(p.name)}</a> – ₹${effectivePrice(p)}</li>`).join('')}</ul>${
+        cat.description ? `<h2>About ${esc(cat.name)}</h2><p>${esc(stripHtml(cat.description))}</p>` : ''
+      }${faqs.length ? `<h2>Frequently asked questions</h2>${faqs.map((f) => `<h3>${esc(f.question)}</h3><p>${esc(stripHtml(f.answer))}</p>`).join('')}` : ''}`,
     };
   }
 
@@ -547,8 +589,22 @@ export const buildSeoForPath = async (rawPath = '/') => {
             { name: blog.title, url: `/blog/${blog.slug}` },
           ]),
         },
+        ...((blog.faqs || []).length
+          ? [
+              {
+                id: 'faq-schema-jsonld',
+                data: {
+                  '@context': 'https://schema.org',
+                  '@type': 'FAQPage',
+                  mainEntity: blog.faqs.map((f) => ({ '@type': 'Question', name: stripHtml(f.question), acceptedAnswer: { '@type': 'Answer', text: stripHtml(f.answer) } })),
+                },
+              },
+            ]
+          : []),
       ],
-      bodyHtml: `<article><h1>${esc(blog.title)}</h1><p>${esc(blog.excerpt || '')}</p><div>${truncate(blog.content, 2000)}</div></article>`,
+      bodyHtml: `<article><h1>${esc(blog.title)}</h1><p>${esc(blog.excerpt || '')}</p><div>${esc(truncate(stripHtml(blog.content), 2000))}</div>${
+        (blog.faqs || []).length ? `<h2>Frequently asked questions</h2>${blog.faqs.map((f) => `<h3>${esc(f.question)}</h3><p>${esc(f.answer)}</p>`).join('')}` : ''
+      }</article>`,
     };
   }
 

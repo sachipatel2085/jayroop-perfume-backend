@@ -12,7 +12,17 @@
     "seed:demo": "node src/seed/seedData.js",
     "test:api": "node src/test/test-api.js",
     "smoke:pdf": "node src/test/smoke-pdf.js",
-    "migrate:types": "node src/scripts/migrateProductTypes.js"
+    "migrate:types": "node src/scripts/migrateProductTypes.js",
+    "catalog:preview": "node src/seed/seedCatalog.js",
+    "catalog:wipe": "node src/seed/seedCatalog.js --wipe --yes",
+    "catalog:add": "node src/seed/seedCatalog.js --add --yes",
+    "catalog:reset": "node src/seed/seedCatalog.js --reset --yes",
+    "catalog:restore": "node src/seed/seedCatalog.js --yes --restore",
+    "blogs:preview": "node src/seed/seedBlogs.js",
+    "blogs:wipe": "node src/seed/seedBlogs.js --wipe --yes",
+    "blogs:add": "node src/seed/seedBlogs.js --add --yes",
+    "blogs:reset": "node src/seed/seedBlogs.js --reset --yes",
+    "blogs:restore": "node src/seed/seedBlogs.js --yes --restore"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",

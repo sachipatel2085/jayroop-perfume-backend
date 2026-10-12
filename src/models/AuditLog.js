@@ -18,6 +18,7 @@ const auditLogSchema = new mongoose.Schema(
         'PRODUCT_CREATED',
         'PRODUCT_UPDATED',
         'PRODUCT_DELETED',
+        'PRODUCT_DELETED_PERMANENTLY',
         'CATEGORY_CREATED',
         'CATEGORY_UPDATED',
         'CATEGORY_DELETED',

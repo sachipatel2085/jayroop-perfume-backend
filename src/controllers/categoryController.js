@@ -13,9 +13,15 @@ const slugifyCat = (v = '') =>
 // Whitelisted, normalised category input (tax / type defaults are inherited by every product in it)
 const categoryInput = (body = {}) => {
   const d = {};
-  ['name', 'description', 'image', 'featured', 'status', 'seo', 'googleProductCategory'].forEach((k) => {
+  ['name', 'intro', 'description', 'image', 'featured', 'status', 'seo', 'googleProductCategory'].forEach((k) => {
     if (body[k] !== undefined) d[k] = body[k];
   });
+  if (Array.isArray(body.faqs)) {
+    d.faqs = body.faqs
+      .map((f) => ({ question: String(f?.question || '').trim(), answer: String(f?.answer || '').trim() }))
+      .filter((f) => f.question && f.answer)
+      .slice(0, 20);
+  }
   if (body.slug !== undefined) d.slug = slugifyCat(body.slug);
   if (body.parent !== undefined) d.parent = body.parent || null;
   if (body.sortOrder !== undefined) d.sortOrder = Number(body.sortOrder) || 0;
@@ -191,7 +197,7 @@ export const deleteCategory = async (req, res, next) => {
     if (productCount > 0) {
       return res.status(400).json({
         success: false,
-        message: `Cannot delete category. ${productCount} product(s) are assigned to it. Reassign products first.`,
+        message: `Cannot delete this category – ${productCount} product(s) are still in it (archived ones count too). Delete them in Admin › Products (Delete permanently) or move them to another category first.`,
       });
     }
 

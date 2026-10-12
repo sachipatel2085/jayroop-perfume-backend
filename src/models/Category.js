@@ -23,11 +23,27 @@ const categorySchema = new mongoose.Schema(
       default: null,
       index: true,
     },
+    // Short plain-text line shown in the category banner (1–2 sentences)
+    intro: {
+      type: String,
+      trim: true,
+      default: '',
+      maxlength: [400, 'Intro cannot exceed 400 characters'],
+    },
+    // Rich HTML – the long "About this category" text shown under the products (SEO content)
     description: {
       type: String,
       trim: true,
       default: '',
     },
+    // Shown on the category page and published as FAQPage structured data
+    faqs: [
+      {
+        _id: false,
+        question: { type: String, trim: true, maxlength: 300 },
+        answer: { type: String, trim: true, maxlength: 3000 },
+      },
+    ],
     image: {
       url: { type: String, default: '' },
       publicId: { type: String, default: '' },

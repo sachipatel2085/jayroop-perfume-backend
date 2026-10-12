@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { HOME_SEO } from '../seo/homeContent.js';
 
 /**
  * Store-wide configuration singleton (key = "store_settings").
@@ -92,19 +93,17 @@ const settingSchema = new mongoose.Schema(
     // ───────────── Global storefront SEO & webmaster ─────────────
     defaultMetaTitle: {
       type: String,
-      default: 'Jayrup | Skincare & Luxury Perfumes – Shop Online in India',
+      default: HOME_SEO.title,
       trim: true,
     },
     defaultMetaDescription: {
       type: String,
-      default:
-        'Shop Jayrup online – effective skincare and long-lasting luxury perfumes, made in India. Genuine products, secure PhonePe & COD checkout, delivery across India.',
+      default: HOME_SEO.description,
       trim: true,
     },
     defaultMetaKeywords: {
       type: String,
-      default:
-        'jayrup, jayrup perfume, jayrup skincare, luxury perfume india, eau de parfum, long lasting perfume, skincare india, jayrup pimples cream',
+      default: HOME_SEO.keywords,
       trim: true,
     },
     googleSiteVerification: { type: String, default: '', trim: true },
@@ -123,14 +122,20 @@ const settingSchema = new mongoose.Schema(
 // changed them, they are upgraded to the product-neutral defaults automatically (once).
 const LEGACY_DEFAULTS = [
   ['business.tradeName', ['Jayrup Pimples Cream']],
-  ['defaultMetaTitle', ['Jayrup | Pimples Cream, Ayurvedic Skincare & Luxury Perfumes Online India']],
+  ['defaultMetaTitle', ['Jayrup | Pimples Cream, Ayurvedic Skincare & Luxury Perfumes Online India', 'Jayrup | Skincare & Luxury Perfumes – Shop Online in India']],
   [
     'defaultMetaDescription',
-    ['Shop Jayrup online – Ayurvedic-inspired Pimples Cream for acne & marks, skincare and long-lasting luxury perfumes. Made in India. Secure PhonePe & COD checkout, delivery across India.'],
+    [
+      'Shop Jayrup online – Ayurvedic-inspired Pimples Cream for acne & marks, skincare and long-lasting luxury perfumes. Made in India. Secure PhonePe & COD checkout, delivery across India.',
+      'Shop Jayrup online – effective skincare and long-lasting luxury perfumes, made in India. Genuine products, secure PhonePe & COD checkout, delivery across India.',
+    ],
   ],
   [
     'defaultMetaKeywords',
-    ['jayrup, jayrup pimples cream, pimple cream, anti acne cream, acne marks cream, ayurvedic skincare, luxury perfume india, eau de parfum, jayrup perfume'],
+    [
+      'jayrup, jayrup pimples cream, pimple cream, anti acne cream, acne marks cream, ayurvedic skincare, luxury perfume india, eau de parfum, jayrup perfume',
+      'jayrup, jayrup perfume, jayrup skincare, luxury perfume india, eau de parfum, long lasting perfume, skincare india, jayrup pimples cream',
+    ],
   ],
   ['invoice.termsText', ['Goods once sold are subject to our Return & Refund Policy available at jayrup.in/return-policy. Subject to Sabarkantha (Gujarat) jurisdiction.']],
 ];

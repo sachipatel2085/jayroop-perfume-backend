@@ -2,6 +2,14 @@ import { Blog } from '../models/Blog.js';
 import { Redirect } from '../models/Redirect.js';
 import { logAdminAction } from '../utils/auditLogger.js';
 
+const cleanFaqs = (faqs) =>
+  Array.isArray(faqs)
+    ? faqs
+        .map((f) => ({ question: String(f?.question || '').trim(), answer: String(f?.answer || '').trim() }))
+        .filter((f) => f.question && f.answer)
+        .slice(0, 20)
+    : [];
+
 // @desc    Get all published blogs
 // @route   GET /api/v1/blogs
 // @access  Public
@@ -89,6 +97,8 @@ export const createBlog = async (req, res, next) => {
       readTime,
       status,
       seo,
+      faqs,
+      relatedProductSlugs,
     } = req.body;
 
     const formattedSlug = (slug || title)
@@ -110,12 +120,14 @@ export const createBlog = async (req, res, next) => {
       excerpt,
       content,
       coverImage,
-      author: author || 'Jayroop Editorial House',
+      author: author || 'Jayrup Editorial Team',
       category: category || 'Fragrance & Skincare',
       tags: tags || [],
       readTime: readTime || '5 min read',
       status: status || 'PUBLISHED',
       seo: seo || {},
+      faqs: cleanFaqs(faqs),
+      relatedProductSlugs: Array.isArray(relatedProductSlugs) ? relatedProductSlugs.filter(Boolean).slice(0, 6) : [],
     });
 
     await logAdminAction({
@@ -153,6 +165,7 @@ export const updateBlog = async (req, res, next) => {
       await Redirect.registerRedirect(`/blog/${oldSlug}`, `/blog/${newSlug}`, 'BLOG');
     }
 
+    if (req.body.faqs !== undefined) req.body.faqs = cleanFaqs(req.body.faqs);
     const updated = await Blog.findByIdAndUpdate(req.params.id, req.body, {
       new: true,
       runValidators: true,

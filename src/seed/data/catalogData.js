@@ -12,6 +12,10 @@ const MARKETED_BY = 'Jayrup, G-28 Metropolis Complex, Bhiloda Road, Gambhoi, Him
 const CUSTOMER_CARE = '+91 63594 95647 · care@jayrup.in · jayrup.in';
 
 // ───────────────────────────── CATEGORIES ─────────────────────────────
+// image  → wide banner (1600×560) in jayroop-perfume-frontend/public/images/categories/
+// intro  → one plain sentence shown in the category banner
+// description → rich "About" text shown under the products (the long-form SEO content)
+// faqs   → shown on the page and published as FAQPage structured data
 export const CATEGORIES = [
   {
     key: 'perfumes',
@@ -20,20 +24,62 @@ export const CATEGORIES = [
     productType: 'FRAGRANCE',
     hsnCode: '3303',
     gstRate: 18,
+    googleProductCategory: 'Health & Beauty > Personal Care > Cosmetics > Perfume & Cologne',
     sortOrder: 1,
     featured: true,
     status: 'ACTIVE',
     image: {
-      url: '/images/products/royal-flora-edp-50ml-1.webp',
-      altText: 'Jayrup luxury perfumes – Royal Flora Eau de Parfum 50 ml with gift tube',
+      url: '/images/categories/luxury-perfumes.webp',
+      altText: 'Jayrup luxury perfumes for men – Royal Flora Eau de Parfum 50 ml bottle with gift tube',
     },
-    description: `<p><strong>Jayrup Luxury Perfumes</strong> are long-lasting Eau de Parfums made in India for people who like to be remembered. Each fragrance comes in a premium, gift-ready pack and is <strong>cruelty free</strong>.</p>
-<p>Start with <strong>Royal Flora</strong> – <em>Marwad ka Pahla Luxury Perfume</em> and the royal man’s first choice.</p>`,
+    intro:
+      'Long-lasting Eau de Parfum made in India, in premium gift-ready packs. Meet Royal Flora – Marwad ka Pahla Luxury Perfume and the royal man’s first choice.',
+    description: `<h2>Luxury perfumes for men, made in India</h2>
+<p><strong>Jayrup Luxury Perfumes</strong> are created for people who like to be remembered. Every fragrance is an <strong>Eau de Parfum (EDP)</strong> – a higher concentration of perfume oil than a deodorant or body mist – so a few sprays carry you through the day.</p>
+<h3>Why choose a Jayrup perfume</h3>
+<ul>
+<li><strong>Long lasting:</strong> Eau de Parfum strength for all-day presence.</li>
+<li><strong>Gift-ready:</strong> a premium bottle in a matching gift tube – ideal for birthdays, weddings and festivals.</li>
+<li><strong>Cruelty free</strong> and made in India.</li>
+<li><strong>Value:</strong> luxury feel at an everyday price, with secure PhonePe and Cash on Delivery checkout.</li>
+</ul>
+<h3>Royal Flora Eau de Parfum 50 ml</h3>
+<p><strong>Royal Flora</strong> is our signature scent – <em>Marwad ka Pahla Luxury Perfume</em> – a confident, royal fragrance for men that works for office, evenings and celebrations.</p>
+<h3>How to make your perfume last longer</h3>
+<ol>
+<li>Spray on pulse points – neck, wrists and behind the ears – from about 15 cm away.</li>
+<li>Apply right after a shower, on clean and moisturised skin.</li>
+<li>Don’t rub your wrists together; let the perfume settle on its own.</li>
+<li>Store the bottle in a cool, dry place away from direct sunlight.</li>
+</ol>`,
+    faqs: [
+      {
+        question: 'How long does Jayrup perfume last?',
+        answer: 'Jayrup perfumes are Eau de Parfum (EDP), which has a higher perfume-oil concentration than deodorants or body mists, so the fragrance lasts for many hours. Longevity varies with skin type and weather – applying on moisturised skin and pulse points helps it last longer.',
+      },
+      {
+        question: 'Is Jayrup Royal Flora a perfume for men?',
+        answer: 'Yes. Royal Flora is crafted as a royal, confident fragrance for men – “Royal man’s first choice”. Many people also buy it as a gift.',
+      },
+      {
+        question: 'Is the perfume original and cruelty free?',
+        answer: 'Yes. Every Jayrup perfume sold on jayrup.in is a genuine product shipped directly by Jayrup, and our perfumes are cruelty free.',
+      },
+      {
+        question: 'Do you offer Cash on Delivery for perfumes?',
+        answer: 'Yes. You can pay securely online with PhonePe (UPI, cards, net banking) or choose Cash on Delivery at checkout, with delivery across India.',
+      },
+      {
+        question: 'Can I return a perfume?',
+        answer: 'For hygiene and safety reasons, opened perfumes cannot be returned. If your order arrives damaged or wrong, contact us within the return window shown in our Return & Refund Policy and we will make it right.',
+      },
+    ],
     seo: {
       metaTitle: 'Luxury Perfumes for Men – Long Lasting Eau de Parfum | Jayrup',
       metaDescription:
-        'Shop Jayrup luxury perfumes online – long-lasting Eau de Parfum made in India, in premium gift packs. Royal Flora EDP 50 ml. Secure PhonePe & COD, delivery across India.',
-      metaKeywords: 'jayrup perfume, luxury perfume for men, eau de parfum india, long lasting perfume, royal flora perfume, perfume gift for men',
+        'Shop Jayrup luxury perfumes for men – long-lasting Eau de Parfum made in India in premium gift packs. Royal Flora EDP 50 ml. PhonePe & COD, delivery across India.',
+      metaKeywords:
+        'jayrup perfume, luxury perfume for men, long lasting perfume for men, eau de parfum india, royal flora perfume, perfume gift for men, best perfume for men in india',
       focusKeyword: 'luxury perfume for men',
       canonicalUrl: '',
     },
@@ -45,20 +91,62 @@ export const CATEGORIES = [
     productType: 'AYURVEDIC',
     hsnCode: '30049011',
     gstRate: 5,
+    googleProductCategory: 'Health & Beauty > Personal Care > Cosmetics > Skin Care > Acne Treatments & Kits',
     sortOrder: 2,
     featured: true,
     status: 'ACTIVE',
     image: {
-      url: '/images/products/pimples-cream-20g-1.webp',
-      altText: 'Jayrup Pimples Cream 20 g – Ayurvedic proprietary medicine for pimples',
+      url: '/images/categories/ayurvedic-skin-care.webp',
+      altText: 'Jayrup Ayurvedic skin care – Jayrup Pimples Cream 20 g Ayurvedic proprietary medicine jar',
     },
-    description: `<p><strong>Jayrup Ayurvedic Skin Care</strong> brings classical Ayurvedic herbs to everyday skin concerns. Our products are made in GMP-certified, licensed facilities and are meant for <strong>external use only</strong>.</p>
-<p>Explore <strong>Jayrup Pimples Cream</strong> – an Ayurvedic proprietary medicine with Neem, Karanj, Manjistha and Daruhaldi for pimple-prone skin.</p>`,
+    intro:
+      'Classical Ayurvedic herbs for everyday skin concerns – made in a licensed, GMP-certified facility. Discover Jayrup Pimples Cream for pimple-prone skin.',
+    description: `<h2>Ayurvedic care for pimple-prone skin</h2>
+<p><strong>Jayrup Ayurvedic Skin Care</strong> brings time-tested Ayurvedic herbs to modern skin concerns. Our products are licensed <strong>Ayurvedic proprietary medicines</strong>, made in a GMP-certified facility, and are meant for <strong>external use only</strong>.</p>
+<h3>Jayrup Pimples Cream – 20 g</h3>
+<p>An Ayurvedic cream with a herbal base of <strong>Neem (Azadirachta indica)</strong> and <strong>Karanj (Pongamia pinnata)</strong> oils, with <strong>Manjistha, Daruhaldi, Bakuchi, Chirata</strong>, <strong>Camphor</strong> and <strong>Sulphur</strong> – a classical Ayurvedic formula for skin care.</p>
+<h3>Why Jayrup Ayurvedic skin care</h3>
+<ul>
+<li><strong>Licensed Ayurvedic medicine</strong> – Mfg. Lic. No. 518 D.</li>
+<li><strong>Herbal formula</strong> based on classical Ayurvedic ingredients.</li>
+<li><strong>Small, travel-friendly 20 g jar</strong> – easy to carry.</li>
+<li>Secure PhonePe and Cash on Delivery checkout, delivery across India.</li>
+</ul>
+<h3>How to use</h3>
+<ol>
+<li>Wash your face with a mild cleanser and pat dry.</li>
+<li>Apply a thin layer only on the affected area, as directed on the pack or by your physician.</li>
+<li>Do a patch test first if you have sensitive skin. Avoid contact with eyes.</li>
+</ol>
+<div data-callout="warning" class="callout callout-warning"><p>For external use only. Keep out of reach of children. Store in a cool, dry place away from direct sunlight. If irritation occurs, stop use and consult a doctor.</p></div>`,
+    faqs: [
+      {
+        question: 'What is Jayrup Pimples Cream?',
+        answer: 'Jayrup Pimples Cream is an Ayurvedic proprietary medicine for external use on pimple-prone skin. It is made in a licensed, GMP-certified facility (Mfg. Lic. No. 518 D).',
+      },
+      {
+        question: 'What are the main ingredients?',
+        answer: 'The cream has a herbal base of Neem (Azadirachta indica) and Karanj (Pongamia pinnata) oils with Manjistha, Daruhaldi, Bakuchi, Chirata, Camphor and Sulphur. The full ingredient list is printed on the pack and on the product page.',
+      },
+      {
+        question: 'How do I apply the Ayurvedic pimple cream?',
+        answer: 'Cleanse and dry the skin, then apply a thin layer only on the affected area as directed on the pack or by your physician. Do a patch test first if your skin is sensitive, and avoid the eyes.',
+      },
+      {
+        question: 'Is it suitable for all skin types?',
+        answer: 'It is meant for external use on pimple-prone skin. Because everyone’s skin is different, we recommend a patch test before regular use. If irritation occurs, stop use and consult a doctor.',
+      },
+      {
+        question: 'Do you deliver across India with Cash on Delivery?',
+        answer: 'Yes. Pay securely with PhonePe (UPI, cards, net banking) or choose Cash on Delivery, with delivery across India.',
+      },
+    ],
     seo: {
       metaTitle: 'Ayurvedic Cream for Pimples & Acne-Prone Skin | Jayrup',
       metaDescription:
-        'Jayrup Ayurvedic skin care – Jayrup Pimples Cream with Neem, Karanj, Manjistha & Daruhaldi for pimple-prone skin. GMP made, licensed Ayurvedic medicine. COD available.',
-      metaKeywords: 'ayurvedic pimple cream, pimples cream, ayurvedic acne cream, herbal pimple cream, jayrup pimples cream',
+        'Jayrup Ayurvedic skin care – Pimples Cream 20 g with Neem, Karanj, Manjistha & Daruhaldi for pimple-prone skin. Licensed Ayurvedic medicine, GMP made. COD available.',
+      metaKeywords:
+        'ayurvedic pimple cream, ayurvedic cream for pimples, herbal pimple cream, ayurvedic acne cream, neem pimple cream, jayrup pimples cream, pimple cream for oily skin',
       focusKeyword: 'ayurvedic pimple cream',
       canonicalUrl: '',
     },
@@ -473,7 +561,7 @@ export const HERO_AD = {
   mobileMediaUrl: '/images/hero/jayrup-hero-mobile-1080.webp',
   posterUrl: '',
   altText: 'Jayrup Royal Flora Eau de Parfum 50 ml – Marwad ka Pahla Luxury Perfume',
-  seoTitle: 'Jayrup Royal Flora – Luxury Perfume',
+  seoTitle: 'Jayrup Royal Flora – Luxury Perfume for Men',
   ctaText: 'Shop Royal Flora',
   ctaUrl: '/products/jayrup-royal-flora-eau-de-parfum-50ml',
   location: 'HOMEPAGE_HERO',

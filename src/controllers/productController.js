@@ -3,6 +3,9 @@ import { PRODUCT_TYPES, typeOf, resolveTax, isReturnable, isHazmat } from '../co
 import { Product } from '../models/Product.js';
 import { Category } from '../models/Category.js';
 import { Redirect } from '../models/Redirect.js';
+import { Review } from '../models/Review.js';
+import { User } from '../models/User.js';
+import { InfluencerVideo } from '../models/InfluencerVideo.js';
 import { logAdminAction } from '../utils/auditLogger.js';
 import { escapeRegex } from '../utils/helpers.js';
 
@@ -451,6 +454,43 @@ export const deleteProduct = async (req, res, next) => {
       success: true,
       message: 'Product archived successfully',
     });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Delete a product permanently (cannot be undone)
+// @route   DELETE /api/v1/products/:id/permanent
+// @access  Private/Admin
+// Orders and invoices are NOT affected – every order keeps its own copy of the product name, price,
+// HSN and GST. The product's reviews are removed, it is taken out of wishlists, and its old URL is
+// 301-redirected to its category (or /shop) so Google and old links don't hit a 404.
+export const deleteProductPermanently = async (req, res, next) => {
+  try {
+    const product = await Product.findById(req.params.id).populate('category', 'slug status');
+    if (!product) {
+      return res.status(404).json({ success: false, message: 'Product not found' });
+    }
+
+    await Promise.all([
+      Review.deleteMany({ product: product._id }),
+      User.updateMany({ wishlist: product._id }, { $pull: { wishlist: product._id } }),
+      InfluencerVideo.updateMany({ taggedProduct: product._id }, { $set: { taggedProduct: null } }),
+    ]);
+    await Product.deleteOne({ _id: product._id });
+
+    const target = product.category?.slug && product.category.status === 'ACTIVE' ? `/category/${product.category.slug}` : '/shop';
+    await Redirect.registerRedirect(`/products/${product.slug}`, target, 'PRODUCT').catch(() => null);
+
+    await logAdminAction({
+      req,
+      action: 'PRODUCT_DELETED_PERMANENTLY',
+      resource: 'Product',
+      resourceId: product._id.toString(),
+      details: { name: product.name, sku: product.sku, slug: product.slug, redirectedTo: target },
+    });
+
+    res.status(200).json({ success: true, message: `“${product.name}” deleted permanently`, redirectedTo: target });
   } catch (error) {
     next(error);
   }

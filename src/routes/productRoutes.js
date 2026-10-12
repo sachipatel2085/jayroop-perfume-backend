@@ -7,6 +7,7 @@ import {
   createProduct,
   updateProduct,
   deleteProduct,
+  deleteProductPermanently,
 } from '../controllers/productController.js';
 import { protect, authorize } from '../middleware/authMiddleware.js';
 import { PRODUCT_TYPES, HSN_DESCRIPTIONS } from '../config/productTypes.js';
@@ -26,6 +27,8 @@ router.get('/admin/list', ...admin, getAdminProducts);
 router.get('/admin/:id', ...admin, getAdminProduct);
 
 router.route('/:slug').get(getProductBySlug);
+
+router.delete('/:id/permanent', ...admin, deleteProductPermanently);
 
 router
   .route('/:id')
