@@ -203,6 +203,10 @@ export const productSchema = (product, settings, reviews = []) => {
   prop('Concerns', product.concerns?.length ? product.concerns : null);
   prop('Key ingredients', product.ingredients);
   prop('Shelf life', product.shelfLife);
+  prop('Product type', type.label);
+  prop('Net quantity', product.netQuantity);
+  prop('Manufacturing licence', product.licenseNumber);
+  prop('Manufactured by', product.manufacturerDetails);
   const GENDER = { MEN: 'male', WOMEN: 'female', UNISEX: 'unisex' };
 
   const offerFor = (name, sku, price, stock, barcode) => ({

@@ -35,3 +35,6 @@ Thumbs.db
 *.temp
 # PDF/XLSX smoke-test output
 smoke-output/
+
+# Catalogue backups made by `npm run seed:catalog` (contain your product data)
+backups/

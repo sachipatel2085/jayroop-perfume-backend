@@ -37,6 +37,20 @@ export const PRODUCT_TYPES = {
     // Alcohol-based perfumes are flammable: most couriers move them by surface only.
     hazmat: true,
   },
+  AYURVEDIC: {
+    label: 'Ayurvedic medicine (external use)',
+    // 3004 90 11 – medicaments of the Ayurvedic system, packed for retail sale
+    hsnCode: '30049011',
+    hsnDescription: 'Ayurvedic medicaments for retail sale',
+    // Ayurvedic/Unani/Homoeopathic medicaments: 5 % from 22-Sep-2025 (GST 2.0) – confirm with CA
+    suggestedGstRate: 5,
+    googleCategory: 'Health & Beauty > Personal Care > Cosmetics > Skin Care > Acne Treatments & Kits',
+    schemaCategory: 'Ayurvedic Medicine',
+    sections: ['benefits', 'ingredients', 'howToUse', 'precautions', 'skinTypes', 'concerns'],
+    // Medicines are never taken back once delivered & opened (hygiene / tamper safety)
+    defaultReturnable: false,
+    hazmat: false,
+  },
   HAIR_CARE: {
     label: 'Hair care',
     hsnCode: '3305',
@@ -106,6 +120,7 @@ export const HSN_DESCRIPTIONS = {
       .map((t) => [t.hsnCode, t.hsnDescription])
   ),
   3306: 'Preparations for oral or dental hygiene',
+  3004: 'Medicaments for retail sale',
   3302: 'Mixtures of odoriferous substances',
   3301: 'Essential oils',
   3305: 'Preparations for use on the hair',
@@ -125,6 +140,7 @@ export const inferProductType = (product = {}, category = null) => {
   if (byHsn) return byHsn[0];
   const text = `${product.name || ''} ${category?.name || ''}`.toLowerCase();
   if (/perfume|parfum|attar|itr|fragrance|cologne|eau de|edp|edt|body mist/.test(text)) return 'FRAGRANCE';
+  if (/ayurved|proprietary medicine/.test(text)) return 'AYURVEDIC';
   if (/cream|serum|face|skin|gel|lotion|pimple|acne|sunscreen/.test(text)) return 'SKINCARE';
   if (/hair|shampoo|conditioner/.test(text)) return 'HAIR_CARE';
   if (/soap|cleanser|face ?wash/.test(text)) return 'SOAP';

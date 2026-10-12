@@ -1,10 +1,8 @@
+import "./src/config/env.js"; // must stay first: loads .env + MongoDB DNS fix
 import express from "express";
 
 import dotenv from "dotenv";
 import cors from "cors";
-// const dns = require("dns");
-
-// dns.setServers(["8.8.8.8", "1.1.1.1"]);
 import helmet from "helmet";
 import morgan from "morgan";
 import compression from "compression";

@@ -26,6 +26,11 @@ const advertisementSchema = new mongoose.Schema(
       type: String,
       required: [true, 'Please provide media URL'],
     },
+    // Optional portrait artwork for phones (recommended 1080×1350). Falls back to mediaUrl.
+    mobileMediaUrl: {
+      type: String,
+      default: '',
+    },
     posterUrl: {
       type: String,
       default: '', // Thumbnail / poster image for instant video placeholder

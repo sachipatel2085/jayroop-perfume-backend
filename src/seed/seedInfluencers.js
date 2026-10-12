@@ -1,3 +1,4 @@
+import '../config/env.js'; // must stay first: loads .env + MongoDB DNS fix
 import mongoose from 'mongoose';
 import dotenv from 'dotenv';
 import { InfluencerVideo } from '../models/InfluencerVideo.js';

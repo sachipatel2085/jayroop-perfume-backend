@@ -1,3 +1,4 @@
+import "../config/env.js"; // must stay first: loads .env + MongoDB DNS fix
 import mongoose from "mongoose";
 import dotenv from "dotenv";
 import { User } from "../models/User.js";
@@ -11,6 +12,16 @@ import { Review } from "../models/Review.js";
 dotenv.config();
 
 const seedDatabase = async () => {
+  // DEMO DATA ONLY – this wipes users (incl. admins & customers), products, categories, coupons, blogs,
+  // banners and reviews. For the real Jayrup catalogue use:  npm run seed:catalog
+  if (!process.argv.includes("--wipe-everything")) {
+    console.log(
+      "\n[Seed] Demo seeder NOT run. It deletes ALL users, products, coupons, blogs and banners.\n" +
+        "       For the real catalogue use:   npm run seed:catalog\n" +
+        "       To really load demo data:     npm run seed:demo -- --wipe-everything\n",
+    );
+    process.exit(0);
+  }
   try {
     await mongoose.connect(
       process.env.MONGO_URI || "mongodb://127.0.0.1:27017/jayroop_luxury_db",
