@@ -3,6 +3,8 @@ import {
   getMyOrders,
   getMyOrder,
   cancelMyOrder,
+  requestReturn,
+  updateReturnRequest,
   getOrderByIdentifier,
   getAllOrders,
   getAdminOrder,
@@ -24,6 +26,7 @@ const admin = [protect, authorize('ADMIN', 'SUPER_ADMIN')];
 router.get('/my-orders', protect, getMyOrders);
 router.get('/my-orders/:orderNumber', protect, getMyOrder);
 router.post('/my-orders/:orderNumber/cancel', protect, cancelMyOrder);
+router.post('/my-orders/:orderNumber/return-request', protect, requestReturn);
 
 // Admin
 router.get('/', ...admin, getAllOrders);
@@ -31,6 +34,7 @@ router.get('/admin/:id', ...admin, getAdminOrder);
 router.put('/:id/status', ...admin, updateOrderStatus);
 router.put('/:id/tracking', ...admin, updateOrderTracking);
 router.put('/:id/note', ...admin, updateAdminNote);
+router.put('/:id/return-request', ...admin, updateReturnRequest);
 router.post('/:id/invoice', ...admin, generateInvoice);
 router.get('/:id/label', ...admin, downloadShippingLabel);
 router.get('/:id/tax-preview', ...admin, taxPreview);

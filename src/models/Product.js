@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { PRODUCT_TYPE_KEYS } from '../config/productTypes.js';
 
 const variantSchema = new mongoose.Schema({
   title: { type: String, required: true, trim: true }, // e.g. "15 g", "50 ml", "Pack of 2"
@@ -7,6 +8,7 @@ const variantSchema = new mongoose.Schema({
   salePrice: { type: Number, default: null, min: 0 }, // selling price (tax inclusive)
   stock: { type: Number, default: 0, min: 0 },
   weight: { type: Number, default: null, min: 0 }, // grams (shipping weight)
+  netQuantity: { type: String, default: '', trim: true }, // Legal Metrology net quantity of this pack: "15 g", "50 ml"
   barcode: { type: String, default: '', trim: true }, // GTIN / EAN
   attributes: {
     type: Map,
@@ -57,6 +59,9 @@ const productSchema = new mongoose.Schema(
       default: 'Jayrup',
       trim: true,
     },
+    // Drives tax defaults (HSN), PDP sections, return rules, shipping mode and SEO category.
+    // See src/config/productTypes.js – add new kinds of products there.
+    productType: { type: String, enum: [...PRODUCT_TYPE_KEYS, ''], default: '', index: true },
     shortDescription: {
       type: String,
       trim: true,
@@ -96,8 +101,9 @@ const productSchema = new mongoose.Schema(
     maxPerOrder: { type: Number, default: 10, min: 1 },
 
     // ───────────── Tax (GST) ─────────────
-    hsnCode: { type: String, default: '', trim: true }, // 3304 skincare, 3303 perfumes, 3401 soaps
-    gstRate: { type: Number, default: null, min: 0, max: 28 }, // null → store default
+    // Empty → category → product type → Settings › Invoices (see resolveTax in config/productTypes.js)
+    hsnCode: { type: String, default: '', trim: true },
+    gstRate: { type: Number, default: null, min: 0, max: 40 },
 
     // ───────────── Media ─────────────
     images: [
@@ -121,10 +127,19 @@ const productSchema = new mongoose.Schema(
       of: String,
       default: {},
     },
+    // ───────────── Fragrance details (perfumes, attars, mists, scented body care) ─────────────
     fragranceNotes: {
       topNotes: { type: String, default: '', trim: true },
       heartNotes: { type: String, default: '', trim: true },
       baseNotes: { type: String, default: '', trim: true },
+    },
+    fragrance: {
+      family: { type: String, default: '', trim: true }, // Floral, Woody, Oriental/Amber, Fresh, Citrus, Gourmand, Aquatic, Musky
+      concentration: { type: String, default: '', trim: true }, // Eau de Parfum, Eau de Toilette, Parfum, Attar, Body Mist
+      longevity: { type: String, default: '', trim: true }, // "6–8 hours"
+      sillage: { type: String, default: '', trim: true }, // Soft, Moderate, Strong
+      season: [{ type: String, trim: true }], // Summer, Winter, Monsoon, All seasons
+      occasion: [{ type: String, trim: true }], // Daily wear, Office, Evening, Wedding
     },
 
     // ───────────── Rich product information (shown as PDP sections + used in SEO) ─────────────
@@ -133,8 +148,8 @@ const productSchema = new mongoose.Schema(
     ingredients: { type: String, default: '' }, // rich HTML / plain list
     howToUse: { type: String, default: '' }, // rich HTML
     precautions: { type: String, default: '' }, // rich HTML (external use only, patch test …)
-    skinTypes: [{ type: String, trim: true }], // Oily, Combination, Normal, Dry, Sensitive, All
-    concerns: [{ type: String, trim: true }], // Pimples, Acne marks, Oil control …
+    skinTypes: [{ type: String, trim: true }], // skin / hair types the product suits
+    concerns: [{ type: String, trim: true }], // concerns it addresses (any product type)
     gender: { type: String, enum: ['UNISEX', 'MEN', 'WOMEN', ''], default: 'UNISEX' },
     faqs: [faqSchema],
 
@@ -155,6 +170,16 @@ const productSchema = new mongoose.Schema(
     importerDetails: { type: String, default: '', trim: true },
     licenseNumber: { type: String, default: '', trim: true }, // cosmetic manufacturing licence
     customerCareDetails: { type: String, default: '', trim: true },
+
+    // ───────────── Per-product policy & shipping overrides (null → product-type default) ─────────────
+    returnPolicy: {
+      returnable: { type: Boolean, default: null }, // e.g. perfumes default to non-returnable once opened
+      note: { type: String, default: '', trim: true, maxlength: 500 }, // shown on the product page
+    },
+    shipping: {
+      surfaceOnly: { type: Boolean, default: null }, // flammable (perfume) → courier ships by surface
+      note: { type: String, default: '', trim: true, maxlength: 300 },
+    },
 
     tags: [
       {

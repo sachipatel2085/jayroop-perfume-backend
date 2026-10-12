@@ -9,7 +9,8 @@
     "dev": "nodemon server.js",
     "seed": "node src/seed/seedData.js",
     "test:api": "node src/test/test-api.js",
-    "smoke:pdf": "node src/test/smoke-pdf.js"
+    "smoke:pdf": "node src/test/smoke-pdf.js",
+    "migrate:types": "node src/scripts/migrateProductTypes.js"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",

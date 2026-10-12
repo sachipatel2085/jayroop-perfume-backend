@@ -1,3 +1,5 @@
+import { Setting } from '../models/Setting.js';
+import { PRODUCT_TYPES, typeOf, resolveTax, isReturnable, isHazmat } from '../config/productTypes.js';
 import { Product } from '../models/Product.js';
 import { Category } from '../models/Category.js';
 import { Redirect } from '../models/Redirect.js';
@@ -11,6 +13,7 @@ const PRODUCT_FIELDS = [
   'highlights', 'benefits', 'ingredients', 'howToUse', 'precautions', 'skinTypes', 'concerns', 'gender', 'faqs',
   'netQuantity', 'weight', 'dimensions', 'barcode', 'countryOfOrigin', 'shelfLife', 'manufacturerDetails', 'marketedBy',
   'packerDetails', 'importerDetails', 'licenseNumber', 'customerCareDetails', 'tags', 'featured', 'status', 'seo',
+  'productType', 'fragrance', 'returnPolicy', 'shipping',
 ];
 
 const slugify = (v = '') =>
@@ -30,7 +33,28 @@ const normaliseProductInput = (body) => {
     if (data[k] !== undefined && data[k] !== '') data[k] = Math.max(0, Number(data[k]) || 0);
   });
   if (data.salePrice !== undefined) data.salePrice = data.salePrice === '' || data.salePrice === null ? null : Number(data.salePrice);
-  if (data.gstRate !== undefined) data.gstRate = data.gstRate === '' || data.gstRate === null ? null : Math.min(28, Math.max(0, Number(data.gstRate)));
+  if (data.gstRate !== undefined) data.gstRate = data.gstRate === '' || data.gstRate === null ? null : Math.min(40, Math.max(0, Number(data.gstRate)));
+  if (data.productType !== undefined) data.productType = PRODUCT_TYPES[data.productType] ? data.productType : '';
+  if (data.hsnCode !== undefined) data.hsnCode = String(data.hsnCode || '').replace(/\D/g, '').slice(0, 8);
+  const triBool = (v) => (v === true || v === 'true' ? true : v === false || v === 'false' ? false : null);
+  if (data.returnPolicy !== undefined) {
+    data.returnPolicy = { returnable: triBool(data.returnPolicy?.returnable), note: String(data.returnPolicy?.note || '').trim().slice(0, 500) };
+  }
+  if (data.shipping !== undefined) {
+    data.shipping = { surfaceOnly: triBool(data.shipping?.surfaceOnly), note: String(data.shipping?.note || '').trim().slice(0, 300) };
+  }
+  if (data.fragrance !== undefined) {
+    const f = data.fragrance || {};
+    const list = (v) => (Array.isArray(v) ? v : String(v || '').split(',')).map((x) => String(x).trim()).filter(Boolean).slice(0, 10);
+    data.fragrance = {
+      family: String(f.family || '').trim(),
+      concentration: String(f.concentration || '').trim(),
+      longevity: String(f.longevity || '').trim(),
+      sillage: String(f.sillage || '').trim(),
+      season: list(f.season),
+      occasion: list(f.occasion),
+    };
+  }
   if (data.weight !== undefined) data.weight = data.weight === '' || data.weight === null ? null : Number(data.weight);
   if (Array.isArray(data.variants)) {
     data.variants = data.variants
@@ -42,6 +66,7 @@ const normaliseProductInput = (body) => {
         salePrice: v.salePrice === '' || v.salePrice === null || v.salePrice === undefined ? null : Number(v.salePrice),
         stock: Math.max(0, Number(v.stock) || 0),
         weight: v.weight === '' || v.weight === undefined ? null : Number(v.weight),
+        netQuantity: String(v.netQuantity || '').trim(),
         barcode: v.barcode || '',
         attributes: v.attributes || {},
       }));
@@ -102,6 +127,10 @@ export const getProducts = async (req, res, next) => {
         { tags: { $in: [new RegExp(safe, 'i')] } },
         { shortDescription: { $regex: safe, $options: 'i' } },
         { concerns: { $in: [new RegExp(safe, 'i')] } },
+        { 'fragranceNotes.topNotes': { $regex: safe, $options: 'i' } },
+        { 'fragranceNotes.heartNotes': { $regex: safe, $options: 'i' } },
+        { 'fragranceNotes.baseNotes': { $regex: safe, $options: 'i' } },
+        { 'fragrance.family': { $regex: safe, $options: 'i' } },
       ];
     }
 
@@ -198,7 +227,7 @@ export const getProductBySlug = async (req, res, next) => {
       slug: req.params.slug,
       status: 'ACTIVE',
     })
-      .populate('category', 'name slug')
+      .populate('category', 'name slug productType hsnCode gstRate')
       .populate('subCategory', 'name slug');
 
     if (!product) {
@@ -227,10 +256,26 @@ export const getProductBySlug = async (req, res, next) => {
       relatedProducts = [...relatedProducts, ...more];
     }
 
+    // Resolved, product-type aware facts for the storefront (no product-specific code in the UI)
+    const settings = await Setting.getStoreSettings();
+    const tax = resolveTax(product, product.category, settings);
+    const surfaceOnly = isHazmat(product, product.category);
+    const meta = {
+      productType: tax.productType,
+      productTypeLabel: typeOf(tax.productType).label,
+      sections: typeOf(tax.productType).sections,
+      returnable: isReturnable(product, product.category),
+      returnNote: product.returnPolicy?.note || '',
+      surfaceOnly,
+      shippingNote: product.shipping?.note || '',
+      estimatedDeliveryText: surfaceOnly ? settings.surfaceDeliveryText || settings.estimatedDeliveryText : settings.estimatedDeliveryText,
+    };
+
     res.status(200).json({
       success: true,
       data: {
         product,
+        meta,
         relatedProducts,
       },
     });

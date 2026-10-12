@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { PRODUCT_TYPE_KEYS } from '../config/productTypes.js';
 
 const categorySchema = new mongoose.Schema(
   {
@@ -36,6 +37,12 @@ const categorySchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    sortOrder: { type: Number, default: 0 },
+    // Defaults inherited by every product in this category (each product can still override)
+    productType: { type: String, enum: [...PRODUCT_TYPE_KEYS, ''], default: '' },
+    hsnCode: { type: String, default: '', trim: true },
+    gstRate: { type: Number, default: null, min: 0, max: 40 },
+    googleProductCategory: { type: String, default: '', trim: true },
     status: {
       type: String,
       enum: ['ACTIVE', 'INACTIVE'],

@@ -27,6 +27,8 @@ export const renderInvoicePdf = async (order, { copyLabel = 'ORIGINAL FOR RECIPI
   let y = brandBand(doc, {
     title: isTax ? 'TAX INVOICE' : 'INVOICE',
     subtitle: copyLabel,
+    brandName: seller.brandName || settings?.business?.brandName,
+    tagline: seller.tagline ?? settings?.business?.tagline ?? '',
   });
   y += 16;
 
@@ -313,7 +315,10 @@ export const renderInvoicePdf = async (order, { copyLabel = 'ORIGINAL FOR RECIPI
   doc.font(FONT.regular).fontSize(7.4).fillColor(COLORS.text).text(
     [
       termsText,
-      'Products are for external use only. Please read the label before use.',
+      'Please read the label and usage directions before use.',
+      (order.items || []).some((i) => i.returnable === false)
+        ? 'Some items in this order are not returnable once opened (hygiene / sealed products); damaged, leaking or wrong items are replaced as per our policy.'
+        : null,
       order.paymentMethod === 'COD' && !paid ? `Please pay ${money(order.total)} to the delivery partner (cash or UPI).` : null,
       inv.creditNote?.number ? `Credit Note ${inv.creditNote.number} dated ${dateIN(inv.creditNote.date)} issued: ${inv.creditNote.reason} (${money(inv.creditNote.amount)}).` : null,
     ]

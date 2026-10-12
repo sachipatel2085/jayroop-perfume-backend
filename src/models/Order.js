@@ -28,6 +28,10 @@ const orderItemSnapshotSchema = new mongoose.Schema({
     sku: { type: String, default: '' },
     attributes: { type: Map, of: String, default: {} },
   },
+  category: { type: mongoose.Schema.Types.ObjectId, ref: 'Category', default: null },
+  categoryName: { type: String, default: '' }, // Locked for category-wise reports
+  productType: { type: String, default: '' }, // SKINCARE, FRAGRANCE … (config/productTypes.js)
+  returnable: { type: Boolean, default: true }, // locked return eligibility at time of sale
   hsnCode: { type: String, default: '' }, // Locked tax classification
   gstRate: { type: Number, default: 18 },
   mrp: { type: Number, default: 0 }, // Locked MRP (for "you saved")
@@ -203,6 +207,23 @@ const orderSchema = new mongoose.Schema(
     cancelledAt: { type: Date, default: null },
     cancellationReason: { type: String, default: '' },
     customerNote: { type: String, default: '', maxlength: 500 },
+    // Customer return / replacement / issue request (policy: within RETURN_WINDOW_DAYS of delivery)
+    returnRequest: {
+      type: new mongoose.Schema(
+        {
+          reason: { type: String, required: true },
+          message: { type: String, default: '', maxlength: 1500 },
+          preferredResolution: { type: String, enum: ['REPLACEMENT', 'REFUND'], default: 'REPLACEMENT' },
+          items: [{ sku: String, name: String, quantity: Number, _id: false }],
+          status: { type: String, enum: ['OPEN', 'APPROVED', 'REJECTED', 'CLOSED'], default: 'OPEN' },
+          resolution: { type: String, default: '', maxlength: 1000 },
+          requestedAt: { type: Date, default: Date.now },
+          resolvedAt: Date,
+        },
+        { _id: false }
+      ),
+      default: undefined,
+    },
     adminNote: { type: String, default: '' },
 
     invoice: { type: invoiceSchema, default: undefined },

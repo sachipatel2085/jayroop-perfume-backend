@@ -62,6 +62,7 @@ const seedDatabase = async () => {
     const perfumesCategory = await Category.create({
       name: "Perfumes",
       slug: "perfumes",
+      productType: "FRAGRANCE",
       description:
         "Handcrafted luxury extraits and elixirs distilled with the rarest botanicals.",
       image: {
@@ -74,6 +75,7 @@ const seedDatabase = async () => {
     const eauDeParfum = await Category.create({
       name: "Eau De Parfum",
       slug: "eau-de-parfum",
+      productType: "FRAGRANCE",
       parent: perfumesCategory._id,
       description:
         "Long-lasting eau de parfum collections crafted for all-day sillage.",
@@ -83,6 +85,7 @@ const seedDatabase = async () => {
     const extraitDeParfum = await Category.create({
       name: "Extrait De Parfum",
       slug: "extrait-de-parfum",
+      productType: "FRAGRANCE",
       parent: perfumesCategory._id,
       description:
         "Highest concentration 30%+ oils for regal intensity and unforgettable presence.",
@@ -92,6 +95,7 @@ const seedDatabase = async () => {
     const skincareCategory = await Category.create({
       name: "Skincare",
       slug: "skincare",
+      productType: "SKINCARE",
       description:
         "Regal therapeutic botanicals and confidence-restoring formulations.",
       image: {
@@ -104,6 +108,7 @@ const seedDatabase = async () => {
     const faceCreams = await Category.create({
       name: "Face Creams",
       slug: "face-creams",
+      productType: "SKINCARE",
       parent: skincareCategory._id,
       description:
         "High-efficacy blemish-clearing and rejuvenating face creams.",
@@ -113,6 +118,7 @@ const seedDatabase = async () => {
     const soapsCategory = await Category.create({
       name: "Soaps",
       slug: "soaps",
+      productType: "SOAP",
       description:
         "Cold-processed artisanal bath bars infused with royal saffron and oils.",
       image: {
@@ -125,6 +131,7 @@ const seedDatabase = async () => {
     const groomingCategory = await Category.create({
       name: "Grooming",
       slug: "grooming",
+      productType: "BODY_CARE",
       description: "Gentleman luxury grooming oils and elixirs.",
       image: {
         url: "https://images.unsplash.com/photo-1503951914875-452162b0f3f1?auto=format&fit=crop&q=80&w=1000",

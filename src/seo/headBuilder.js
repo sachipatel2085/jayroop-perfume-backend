@@ -4,6 +4,7 @@ import { Blog } from '../models/Blog.js';
 import { Review } from '../models/Review.js';
 import { Setting } from '../models/Setting.js';
 import { Redirect } from '../models/Redirect.js';
+import { typeOf, inferProductType, isReturnable, isHazmat } from '../config/productTypes.js';
 
 /**
  * Server-side SEO head builder.
@@ -100,7 +101,7 @@ export const organizationSchema = (settings) => {
     '@type': 'OnlineStore',
     '@id': `${siteUrl()}/#organization`,
     name: b.brandName || 'Jayrup',
-    alternateName: [b.tradeName, 'Jayrup Pimples Cream', 'जयरूप'].filter(Boolean),
+    alternateName: [...new Set([b.tradeName, 'जयरूप'].filter((n) => n && n !== (b.brandName || 'Jayrup')))],
     legalName: b.legalName || undefined,
     url: siteUrl(),
     logo: { '@type': 'ImageObject', url: `${siteUrl()}/logo-512.png`, width: 512, height: 512 },
@@ -137,7 +138,7 @@ export const websiteSchema = (settings) => ({
   '@type': 'WebSite',
   '@id': `${siteUrl()}/#website`,
   name: settings.business?.brandName || 'Jayrup',
-  alternateName: ['Jayrup Pimples Cream', 'jayrup.in'],
+  alternateName: [siteUrl().replace(/^https?:\/\//, '')],
   url: siteUrl(),
   inLanguage: 'en-IN',
   publisher: { '@id': `${siteUrl()}/#organization` },
@@ -148,17 +149,19 @@ export const websiteSchema = (settings) => ({
   },
 });
 
-export const returnPolicySchema = () => ({
+// Store policy: 3-day window. Returnable products accept unused items in original packaging;
+// non-returnable ones (e.g. perfumes once opened) are only replaced when damaged, leaking or wrong.
+export const returnPolicySchema = (returnable = true) => ({
   '@type': 'MerchantReturnPolicy',
   applicableCountry: 'IN',
   returnPolicyCategory: 'https://schema.org/MerchantReturnFiniteReturnWindow',
   merchantReturnDays: 3,
   returnMethod: 'https://schema.org/ReturnByMail',
-  itemCondition: 'https://schema.org/DamagedCondition',
+  itemCondition: returnable ? ['https://schema.org/NewCondition', 'https://schema.org/DamagedCondition'] : 'https://schema.org/DamagedCondition',
   url: `${siteUrl()}/refund-return-policy`,
 });
 
-export const shippingSchema = (price, settings) => {
+export const shippingSchema = (price, settings, { surfaceOnly = false } = {}) => {
   const threshold = Number(settings.freeShippingThreshold ?? 999);
   const fee = Number(settings.flatShippingFee ?? 100);
   return {
@@ -168,7 +171,7 @@ export const shippingSchema = (price, settings) => {
     deliveryTime: {
       '@type': 'ShippingDeliveryTime',
       handlingTime: { '@type': 'QuantitativeValue', minValue: 0, maxValue: 2, unitCode: 'DAY' },
-      transitTime: { '@type': 'QuantitativeValue', minValue: 3, maxValue: 8, unitCode: 'DAY' },
+      transitTime: { '@type': 'QuantitativeValue', minValue: 3, maxValue: surfaceOnly ? 10 : 8, unitCode: 'DAY' },
     },
   };
 };
@@ -177,8 +180,30 @@ export const productSchema = (product, settings, reviews = []) => {
   const url = `${siteUrl()}/products/${product.slug}`;
   const images = (product.images || []).map((i) => abs(i.url)).filter(Boolean);
   const priceValidUntil = `${new Date().getFullYear() + 1}-12-31`;
-  const brandName = product.brand || 'Jayrup';
+  const brandName = product.brand || settings.business?.brandName || 'Jayrup';
   const gtin = /^\d{8,14}$/.test(product.barcode || '') ? product.barcode : undefined;
+  const type = typeOf(inferProductType(product, product.category));
+  const returnable = isReturnable(product, product.category);
+  const surfaceOnly = isHazmat(product, product.category);
+
+  // Type-specific facts → additionalProperty (only what the admin filled in)
+  const props = [];
+  const prop = (name, val) => val && props.push({ '@type': 'PropertyValue', name, value: Array.isArray(val) ? val.join(', ') : truncate(String(val), 300) });
+  const fn = product.fragranceNotes || {};
+  const fr = product.fragrance || {};
+  prop('Fragrance family', fr.family);
+  prop('Concentration', fr.concentration);
+  prop('Top notes', fn.topNotes);
+  prop('Heart notes', fn.heartNotes);
+  prop('Base notes', fn.baseNotes);
+  prop('Longevity', fr.longevity);
+  prop('Sillage', fr.sillage);
+  prop('Occasion', fr.occasion?.length ? fr.occasion : null);
+  prop('Suitable for', product.skinTypes?.length ? product.skinTypes : null);
+  prop('Concerns', product.concerns?.length ? product.concerns : null);
+  prop('Key ingredients', product.ingredients);
+  prop('Shelf life', product.shelfLife);
+  const GENDER = { MEN: 'male', WOMEN: 'female', UNISEX: 'unisex' };
 
   const offerFor = (name, sku, price, stock, barcode) => ({
     '@type': 'Offer',
@@ -192,8 +217,8 @@ export const productSchema = (product, settings, reviews = []) => {
     availability: stock > 0 ? 'https://schema.org/InStock' : 'https://schema.org/OutOfStock',
     itemCondition: 'https://schema.org/NewCondition',
     seller: { '@id': `${siteUrl()}/#organization` },
-    shippingDetails: shippingSchema(price, settings),
-    hasMerchantReturnPolicy: returnPolicySchema(),
+    shippingDetails: shippingSchema(price, settings, { surfaceOnly }),
+    hasMerchantReturnPolicy: returnPolicySchema(returnable),
   });
 
   const schema = {
@@ -209,16 +234,17 @@ export const productSchema = (product, settings, reviews = []) => {
     ...(gtin ? { gtin } : {}),
     brand: { '@type': 'Brand', name: brandName },
     manufacturer: product.manufacturerDetails ? { '@type': 'Organization', name: truncate(product.manufacturerDetails, 120) } : undefined,
-    category: product.category?.name,
+    category: [type.schemaCategory, product.category?.name].filter(Boolean).join(' > ') || undefined,
     countryOfOrigin: product.countryOfOrigin || 'India',
     ...(product.netQuantity ? { size: product.netQuantity } : {}),
     ...(product.weight ? { weight: { '@type': 'QuantitativeValue', value: product.weight, unitCode: 'GRM' } } : {}),
-    ...(product.ingredients ? { additionalProperty: [{ '@type': 'PropertyValue', name: 'Key Ingredients', value: truncate(product.ingredients, 300) }] } : {}),
+    ...(GENDER[product.gender] ? { audience: { '@type': 'PeopleAudience', suggestedGender: GENDER[product.gender] } } : {}),
+    ...(props.length ? { additionalProperty: props } : {}),
   };
 
   if (product.variants?.length) {
     const offers = product.variants.map((v) =>
-      offerFor(`${product.name} – ${v.title}`, v.sku, v.salePrice && v.salePrice < v.price ? v.salePrice : v.price, v.stock, v.barcode)
+      offerFor(`${product.name} – ${v.netQuantity || v.title}`, v.sku, v.salePrice && v.salePrice < v.price ? v.salePrice : v.price, v.stock, v.barcode)
     );
     const prices = offers.map((o) => Number(o.price));
     schema.offers = {
@@ -280,25 +306,26 @@ const STATIC = {
     priority: '1.0',
   },
   '/shop': {
-    title: 'Shop All Products – Pimples Cream, Skincare & Perfumes | Jayrup',
-    description: 'Shop the complete Jayrup range online: Ayurvedic-inspired Pimples Cream for acne & marks, daily skincare and long-lasting perfumes. Pay with PhonePe or COD. Delivery across India.',
+    title: 'Shop All Products – Skincare & Perfumes | Jayrup',
+    description: 'Shop the complete Jayrup range online – skincare, long-lasting perfumes and more. Genuine products, PhonePe & COD payment, delivery across India.',
+    dynamic: 'shop',
     priority: '0.9',
     changefreq: 'daily',
   },
   '/about': {
-    title: 'About Jayrup – Ayurvedic-Inspired Skincare Made in India',
-    description: 'Jayrup creates safe, effective and affordable cosmetic skincare inspired by Ayurveda and modern cosmetic science. Learn about our philosophy, quality standards and vision.',
+    title: 'About Jayrup – Skincare & Fragrances Made in India',
+    description: 'Jayrup creates safe, effective and affordable skincare and long-lasting fragrances, combining traditional wisdom with modern cosmetic science. Learn about our philosophy and quality standards.',
     priority: '0.7',
   },
   '/contact-us': {
     title: 'Contact Jayrup – Customer Care, Orders & Returns',
-    description: 'Questions about Jayrup Pimples Cream or your order? Call +91 94081 33100 or email care@jayrup.in. Business address: G-28 Metropolis Complex, Himatnagar, Gujarat 383030.',
+    description: 'Questions about a Jayrup product or your order? Call +91 94081 33100 or email care@jayrup.in. Business address: G-28 Metropolis Complex, Himatnagar, Gujarat 383030.',
     priority: '0.7',
   },
-  '/faq': { title: 'FAQs – Orders, Delivery, Payments & Product Usage | Jayrup', description: 'Answers to common questions about Jayrup products, how to use Pimples Cream, delivery timelines, PhonePe & COD payments, returns and refunds.', priority: '0.6' },
-  '/blog': { title: 'Skincare Journal – Acne Care Tips & Guides | Jayrup', description: 'Expert-backed tips on pimples, acne marks, oily skin and daily skincare routines for Indian skin from the Jayrup journal.', priority: '0.7', changefreq: 'weekly' },
-  '/shipping-policy': { title: 'Shipping Policy | Jayrup', description: 'Jayrup ships across India via registered courier partners. Orders are delivered in 7–10 business days. Read about charges, tracking and damaged shipments.', priority: '0.3' },
-  '/refund-return-policy': { title: 'Return & Refund Policy | Jayrup', description: 'Return or exchange within 3 days of delivery for damaged or defective items. Refunds are credited to the original payment method. Read the full Jayrup policy.', priority: '0.3' },
+  '/faq': { title: 'FAQs – Orders, Delivery, Payments & Product Usage | Jayrup', description: 'Answers to common questions about Jayrup skincare and perfumes, product usage, delivery timelines, PhonePe & COD payments, returns and refunds.', priority: '0.6' },
+  '/blog': { title: 'The Jayrup Journal – Skincare Tips & Fragrance Guides', description: 'Skincare routines for Indian skin, fragrance guides, how to choose and wear perfume, and product tips from the Jayrup journal.', priority: '0.7', changefreq: 'weekly' },
+  '/shipping-policy': { title: 'Shipping Policy | Jayrup', description: 'Jayrup ships across India via registered courier partners. Orders are delivered in 7–10 business days (perfumes travel by surface). Read about charges, tracking and damaged shipments.', priority: '0.3' },
+  '/refund-return-policy': { title: 'Return & Refund Policy | Jayrup', description: 'Return or exchange within 3 days for eligible items; damaged, leaking or wrong products are always replaced or refunded. Refunds go to the original payment method.', priority: '0.3' },
   '/privacy-policy': { title: 'Privacy Policy | Jayrup', description: 'How Jayrup collects, uses, shares and protects your personal data when you use jayrup.in.', priority: '0.2', changefreq: 'yearly' },
   '/terms-and-conditions': { title: 'Terms and Conditions | Jayrup', description: 'Terms of use governing access to and purchases from jayrup.in, published under the Information Technology Act, 2000.', priority: '0.2', changefreq: 'yearly' },
   '/track-order': { title: 'Track Your Order | Jayrup', description: 'Track your Jayrup order status and courier shipment.', priority: '0.3', noindex: true },
@@ -335,14 +362,46 @@ export const buildSeoForPath = async (rawPath = '/') => {
     return { ...base, robots: 'noindex, nofollow', title: `${settings.business?.brandName || 'Jayrup'}`, jsonLd: [] };
   }
 
-  if (path === '/') {
+  if (path === '/' || path === '/shop') {
+    // Built from whatever is in the catalogue right now – no product is hard-coded.
+    const [cats, featured] = await Promise.all([
+      Category.find({ status: 'ACTIVE', parent: null }).select('name slug').sort({ sortOrder: 1, name: 1 }).limit(20).lean(),
+      Product.find({ status: 'ACTIVE' }).select('name slug price salePrice shortDescription').sort({ featured: -1, totalSold: -1, createdAt: -1 }).limit(24).lean(),
+    ]);
+    const brand = settings.business?.brandName || 'Jayrup';
+    const catNames = cats.map((c) => c.name);
+    const links = `${cats.length ? `<h2>Shop by category</h2><ul>${cats.map((c) => `<li><a href="/category/${esc(c.slug)}">${esc(c.name)}</a></li>`).join('')}</ul>` : ''}${
+      featured.length ? `<h2>Products</h2><ul>${featured.map((p) => `<li><a href="/products/${esc(p.slug)}">${esc(p.name)}</a> – ₹${effectivePrice(p)}</li>`).join('')}</ul>` : ''
+    }`;
+    const itemList = featured.length
+      ? {
+          '@context': 'https://schema.org',
+          '@type': 'ItemList',
+          itemListElement: featured.slice(0, 20).map((p, i) => ({ '@type': 'ListItem', position: i + 1, url: `${siteUrl()}/products/${p.slug}`, name: p.name })),
+        }
+      : null;
+
+    if (path === '/') {
+      return {
+        ...base,
+        jsonLd: [
+          { id: 'organization-schema-jsonld', data: organizationSchema(settings) },
+          { id: 'website-schema-jsonld', data: websiteSchema(settings) },
+        ],
+        bodyHtml: `<h1>${esc(brand)}${settings.business?.tagline ? ` – ${esc(settings.business.tagline)}` : ''}</h1><p>${esc(settings.defaultMetaDescription)}</p>${links}`,
+      };
+    }
+    const s = STATIC['/shop'];
+    const list = catNames.length > 1 ? `${catNames.slice(0, -1).join(', ')} & ${catNames.at(-1)}` : catNames[0];
     return {
       ...base,
+      title: list ? `Shop ${list} Online | ${brand}` : s.title,
+      description: list ? truncate(`Shop the complete ${brand} range online – ${list}. Genuine products, PhonePe & COD payment, delivery across India.`, 160) : s.description,
       jsonLd: [
-        { id: 'organization-schema-jsonld', data: organizationSchema(settings) },
-        { id: 'website-schema-jsonld', data: websiteSchema(settings) },
+        { id: 'breadcrumb-schema-jsonld', data: breadcrumbSchema([{ name: 'Home', url: '/' }, { name: 'Shop', url: '/shop' }]) },
+        ...(itemList ? [{ id: 'collection-schema-jsonld', data: { '@context': 'https://schema.org', '@type': 'CollectionPage', name: `Shop – ${brand}`, url: `${siteUrl()}/shop`, mainEntity: itemList } }] : []),
       ],
-      bodyHtml: `<h1>${esc(settings.business?.brandName || 'Jayrup')} – Pimples Cream, Ayurvedic Skincare & Perfumes</h1><p>${esc(settings.defaultMetaDescription)}</p>`,
+      bodyHtml: `<h1>Shop all products</h1>${links}`,
     };
   }
 
@@ -364,7 +423,7 @@ export const buildSeoForPath = async (rawPath = '/') => {
 
   let m = /^\/products\/([a-z0-9-]+)$/.exec(path);
   if (m) {
-    const product = await Product.findOne({ slug: m[1], status: 'ACTIVE' }).populate('category', 'name slug').lean();
+    const product = await Product.findOne({ slug: m[1], status: 'ACTIVE' }).populate('category', 'name slug productType hsnCode').lean();
     if (!product) return { ...base, status: 404, title: 'Product not found | Jayrup', robots: 'noindex, follow' };
     const reviews = product.numReviews
       ? await Review.find({ product: product._id, isApproved: true }).populate('user', 'name').sort({ createdAt: -1 }).limit(5).lean()

@@ -6,8 +6,19 @@ import { cancelOrder } from '../services/orderLifecycle.js';
 import { issueInvoice, previewInvoice } from '../services/invoiceService.js';
 import { renderInvoicePdf } from '../services/pdf/invoicePdf.js';
 import { renderShippingLabelPdf } from '../services/pdf/labelPdf.js';
-import { sendShippedMail, sendDeliveredMail } from '../services/mailer.js';
 import { httpError } from '../services/pricingService.js';
+import { sendMail, sendShippedMail, sendDeliveredMail } from '../services/mailer.js';
+import { ContactInquiry } from '../models/ContactInquiry.js';
+import { RETURN_WINDOW_DAYS, RETURN_REASONS } from '../config/productTypes.js';
+
+const deliveredAtOf = (o) => {
+  const h = [...(o.statusHistory || [])].reverse().find((x) => x.status === 'DELIVERED');
+  return h ? new Date(h.timestamp) : null;
+};
+const returnWindowEnd = (o) => {
+  const d = deliveredAtOf(o);
+  return d ? new Date(d.getTime() + RETURN_WINDOW_DAYS * 86400000) : null;
+};
 
 // Courier tracking deep links
 const buildCourierTrackingUrl = (courier, trackingId) => {
@@ -44,6 +55,10 @@ const sanitizeForCustomer = (order) => {
   o.invoice = o.invoice?.number ? { number: o.invoice.number, date: o.invoice.date, status: o.invoice.status, creditNote: o.invoice.creditNote } : null;
   o.canCancel = ['PENDING_PAYMENT', 'PAID', 'PROCESSING'].includes(o.orderStatus);
   o.canRetryPayment = o.paymentMethod === 'ONLINE' && o.orderStatus === 'PENDING_PAYMENT' && o.paymentStatus !== 'PAID';
+  const windowEnd = returnWindowEnd(o);
+  o.returnWindowEndsAt = windowEnd;
+  o.canRequestReturn = o.orderStatus === 'DELIVERED' && !o.returnRequest && Boolean(windowEnd) && windowEnd > new Date();
+  o.items = (o.items || []).map((i) => ({ ...i, returnable: i.returnable !== false }));
   return o;
 };
 
@@ -171,6 +186,113 @@ export const cancelMyOrder = async (req, res, next) => {
   }
 };
 
+// @desc    Customer: report a problem / request return or replacement (within the policy window)
+// @route   POST /api/v1/orders/my-orders/:orderNumber/return-request
+// @access  Private
+export const requestReturn = async (req, res, next) => {
+  try {
+    const order = await Order.findOne({ orderNumber: req.params.orderNumber, user: req.user._id });
+    if (!order) throw httpError(404, 'Order not found');
+    if (order.orderStatus !== 'DELIVERED') throw httpError(400, 'Returns can be requested once the order is delivered.');
+    if (order.returnRequest) throw httpError(400, 'A request is already open for this order. Our team will contact you shortly.');
+    const end = returnWindowEnd(order);
+    if (!end || end < new Date()) {
+      throw httpError(400, `The ${RETURN_WINDOW_DAYS}-day return window for this order has ended. For help, write to care@jayrup.in.`);
+    }
+
+    const reason = String(req.body.reason || '').toUpperCase();
+    if (!RETURN_REASONS[reason]) throw httpError(400, 'Please choose a reason.');
+    const message = String(req.body.message || '').trim().slice(0, 1500);
+    const preferredResolution = req.body.preferredResolution === 'REFUND' ? 'REFUND' : 'REPLACEMENT';
+
+    const wanted = Array.isArray(req.body.items) && req.body.items.length ? req.body.items.map(String) : order.items.map((i) => i.variant?.sku || i.sku);
+    const items = order.items.filter((i) => wanted.includes(i.variant?.sku || i.sku));
+    if (!items.length) throw httpError(400, 'Please select at least one item.');
+
+    if (!RETURN_REASONS[reason].anyItem) {
+      const blocked = items.filter((i) => i.returnable === false);
+      if (blocked.length) {
+        throw httpError(
+          400,
+          `${blocked.map((i) => i.name).join(', ')} ${blocked.length > 1 ? 'are' : 'is'} not returnable once delivered (hygiene / sealed product). Returns for these are accepted only if damaged, leaking or wrong.`
+        );
+      }
+    }
+    if (['DAMAGED', 'LEAKING', 'SEAL_BROKEN', 'WRONG_ITEM'].includes(reason) && message.length < 10) {
+      throw httpError(400, 'Please describe the problem (and keep photos / unboxing video ready – our team will ask for them).');
+    }
+
+    order.returnRequest = {
+      reason,
+      message,
+      preferredResolution,
+      items: items.map((i) => ({ sku: i.variant?.sku || i.sku, name: `${i.name}${i.variant?.title ? ` (${i.variant.title})` : ''}`, quantity: i.quantity })),
+      status: 'OPEN',
+      requestedAt: new Date(),
+    };
+    order.statusHistory.push({ status: order.orderStatus, timestamp: new Date(), note: `Customer requested ${preferredResolution.toLowerCase()}: ${RETURN_REASONS[reason].label}`, updatedBy: 'CUSTOMER' });
+    await order.save();
+
+    const contact = order.shippingAddress || {};
+    ContactInquiry.create({
+      name: contact.fullName || req.user.name || 'Customer',
+      email: order.customerEmail || contact.email || req.user.email,
+      phone: contact.phone || '',
+      orderNumber: order.orderNumber,
+      subject: 'Return & Replacement Request',
+      message: `[${RETURN_REASONS[reason].label}] Wants: ${preferredResolution}\nItems: ${order.returnRequest.items.map((i) => `${i.name} × ${i.quantity}`).join(', ')}\n\n${message || '(no message)'}`,
+    }).catch(() => {});
+    sendMail({
+      to: process.env.ADMIN_NOTIFY_EMAIL || process.env.SMTP_USER,
+      subject: `Return request – ${order.orderNumber} (${RETURN_REASONS[reason].label})`,
+      html: `<p><b>${order.orderNumber}</b> – ${RETURN_REASONS[reason].label}<br/>Wants: ${preferredResolution}<br/>Items: ${order.returnRequest.items.map((i) => `${i.name} × ${i.quantity}`).join(', ')}</p><p>${message.replace(/</g, '&lt;')}</p>`,
+    }).catch(() => {});
+
+    res.status(200).json({
+      success: true,
+      message: 'Request received. Our team will contact you within 24–48 hours with the next steps.',
+      data: sanitizeForCustomer(order),
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Admin: update a return request (approve / reject / close)
+// @route   PUT /api/v1/orders/:id/return-request
+// @access  Private/Admin
+export const updateReturnRequest = async (req, res, next) => {
+  try {
+    const order = await Order.findById(req.params.id);
+    if (!order) throw httpError(404, 'Order not found');
+    if (!order.returnRequest) throw httpError(400, 'This order has no return request.');
+    const status = String(req.body.status || '').toUpperCase();
+    if (!['OPEN', 'APPROVED', 'REJECTED', 'CLOSED'].includes(status)) throw httpError(400, 'Invalid status');
+    order.returnRequest.status = status;
+    order.returnRequest.resolution = String(req.body.resolution || '').slice(0, 1000);
+    if (status !== 'OPEN') order.returnRequest.resolvedAt = new Date();
+    order.markModified('returnRequest');
+    order.statusHistory.push({
+      status: order.orderStatus,
+      timestamp: new Date(),
+      note: `Return request ${status.toLowerCase()}${order.returnRequest.resolution ? `: ${order.returnRequest.resolution}` : ''}`,
+      updatedBy: req.user.email,
+    });
+    await order.save();
+    await logAdminAction({ req, action: 'RETURN_REQUEST_UPDATED', resource: 'Order', resourceId: order._id.toString(), details: { status } });
+    if (order.customerEmail && status !== 'OPEN') {
+      sendMail({
+        to: order.customerEmail,
+        subject: `Update on your request – ${order.orderNumber}`,
+        html: `<p>Hi ${String(order.shippingAddress?.fullName || '').split(' ')[0] || 'there'},</p><p>Your return / replacement request for order <b>${order.orderNumber}</b> has been <b>${status.toLowerCase()}</b>.</p>${order.returnRequest.resolution ? `<p>${order.returnRequest.resolution.replace(/</g, '&lt;')}</p>` : ''}<p>— Team Jayrup · care@jayrup.in</p>`,
+      }).catch(() => {});
+    }
+    res.status(200).json({ success: true, message: `Return request ${status.toLowerCase()}.`, data: order });
+  } catch (error) {
+    next(error);
+  }
+};
+
 const sendPdf = (res, buffer, filename, inline) => {
   res.setHeader('Content-Type', 'application/pdf');
   res.setHeader('Content-Length', buffer.length);
@@ -267,7 +389,8 @@ export const getAllOrders = async (req, res, next) => {
   try {
     const { status, paymentMethod, paymentStatus, search, from, to, page = 1, limit = 20 } = req.query;
     const filter = {};
-    if (status && ORDER_STATUSES.includes(status)) filter.orderStatus = status;
+    if (status === 'RETURN_OPEN') filter['returnRequest.status'] = 'OPEN';
+    else if (status && ORDER_STATUSES.includes(status)) filter.orderStatus = status;
     if (paymentMethod && ['ONLINE', 'COD'].includes(paymentMethod)) filter.paymentMethod = paymentMethod;
     if (paymentStatus) filter.paymentStatus = paymentStatus;
     if (from || to) {
@@ -289,10 +412,11 @@ export const getAllOrders = async (req, res, next) => {
 
     const lim = Math.min(100, Math.max(1, Number(limit) || 20));
     const pg = Math.max(1, Number(page) || 1);
-    const [total, orders, counts] = await Promise.all([
+    const [total, orders, counts, openReturns] = await Promise.all([
       Order.countDocuments(filter),
       Order.find(filter).populate('user', 'name email phone').sort({ createdAt: -1 }).skip((pg - 1) * lim).limit(lim),
       Order.aggregate([{ $group: { _id: '$orderStatus', n: { $sum: 1 } } }]),
+      Order.countDocuments({ 'returnRequest.status': 'OPEN' }),
     ]);
 
     res.status(200).json({
@@ -301,7 +425,7 @@ export const getAllOrders = async (req, res, next) => {
       total,
       totalPages: Math.ceil(total / lim),
       currentPage: pg,
-      statusCounts: Object.fromEntries(counts.map((c) => [c._id, c.n])),
+      statusCounts: { ...Object.fromEntries(counts.map((c) => [c._id, c.n])), RETURN_OPEN: openReturns },
       data: orders,
     });
   } catch (error) {

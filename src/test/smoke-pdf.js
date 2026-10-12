@@ -17,7 +17,8 @@ fs.mkdirSync(out, { recursive: true });
 const settings = {
   business: {
     brandName: 'Jayrup',
-    tradeName: 'Jayrup Pimples Cream',
+    tradeName: 'Jayrup',
+    tagline: 'Skincare · Fragrances · Personal Care',
     legalName: 'FITJAYESH',
     registrationNote: 'MSME Registered',
     gstin: '24ABCDE1234F1Z5',
@@ -49,7 +50,7 @@ const makeOrder = (state, extra = {}) => {
     orderStatus: 'PAID',
     paymentInfo: { transactionId: 'OM2410121230456789', paymentMode: 'UPI_INTENT' },
     items: [
-      { name: 'Jayrup Pimples Cream', sku: 'JR-PC-15', hsnCode: '3304', gstRate: 18, price: 399, quantity: 2, subtotal: 798, variant: { title: '15 g' } },
+      { name: 'Jayrup Face Cream', sku: 'JR-FC-15', hsnCode: '3304', gstRate: 18, productType: 'SKINCARE', price: 399, quantity: 2, subtotal: 798, variant: { title: '15 g' } },
       { name: 'Royal Flora Eau De Parfum', sku: 'JR-RF-50', hsnCode: '3303', gstRate: 18, price: 1999, quantity: 1, subtotal: 1999, variant: { title: '50 ml' } },
     ],
     subtotal: 2797,
@@ -73,11 +74,26 @@ console.log('Intra-state tax:', { taxable: intra.invoice.totalTaxable, cgst: int
 console.log('Inter-state tax:', { taxable: inter.invoice.totalTaxable, igst: inter.invoice.totalIgst, roundOff: inter.invoice.roundOff, grand: inter.invoice.grandTotal });
 console.log('Words:', amountInWords(2517.5));
 
+// Mixed-rate cart (perfume 18 % + hair oil 5 %) with shipping → shipping must follow the highest item rate
+const mixed = makeOrder('Rajasthan', {
+  items: [
+    { name: 'Royal Oud Eau De Parfum', sku: 'JR-RO-100', hsnCode: '3303', gstRate: 18, productType: 'FRAGRANCE', price: 599, quantity: 1, subtotal: 599, variant: { title: '100 ml' } },
+    { name: 'Herbal Hair Oil', sku: 'JR-HO-100', hsnCode: '3305', gstRate: 5, productType: 'HAIR_CARE', price: 249, quantity: 1, subtotal: 249, variant: { title: '100 ml' } },
+  ],
+  subtotal: 848, discount: 0, appliedCoupon: {}, shipping: 100, total: 948,
+});
+const shipLine = mixed.invoice.lines.find((l) => l.isService);
+console.log('Mixed cart:', mixed.invoice.lines.map((l) => `${l.hsnCode}@${l.gstRate}%`).join(', '), '| shipping rate', shipLine.gstRate);
+if (shipLine.gstRate !== 18) throw new Error('Shipping GST should follow the highest item rate (18%)');
+const fixed = computeTaxBreakup(mixed, { ...settings, invoice: { ...settings.invoice, shippingTaxMode: 'FIXED', shippingGstRate: 12 } });
+if (fixed.lines.find((l) => l.isService).gstRate !== 12) throw new Error('FIXED shipping GST mode not applied');
+
 // Code128 sanity: every symbol must have 11 modules (stop has 13)
 const pattern = code128Pattern('JR-261012-48213');
 console.log('Barcode modules:', [...pattern].reduce((s, d) => s + Number(d), 0));
 
 fs.writeFileSync(path.join(out, 'invoice-intra.pdf'), await renderInvoicePdf(intra, { settings }));
+fs.writeFileSync(path.join(out, 'invoice-mixed-rates.pdf'), await renderInvoicePdf(mixed, { settings }));
 fs.writeFileSync(path.join(out, 'invoice-inter-cod.pdf'), await renderInvoicePdf(inter, { settings }));
 fs.writeFileSync(path.join(out, 'label.pdf'), await renderShippingLabelPdf(inter, { settings }));
 

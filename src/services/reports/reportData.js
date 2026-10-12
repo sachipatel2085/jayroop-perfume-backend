@@ -5,6 +5,7 @@ import { Setting } from '../../models/Setting.js';
 import { computeTaxBreakup } from '../invoiceService.js';
 import { round2, parseDateRange } from '../../utils/helpers.js';
 import { stateCodeOf, canonicalStateName } from '../../utils/indiaStates.js';
+import { HSN_DESCRIPTIONS, PRODUCT_TYPES, resolveTax, inferProductType } from '../../config/productTypes.js';
 
 /**
  * A "valid sale" = revenue the business actually earned/committed:
@@ -38,6 +39,7 @@ export const REPORT_TYPES = {
   gst: 'GST Report (GSTR-1 Ready)',
   hsn: 'HSN-wise Summary',
   products: 'Product-wise Sales',
+  categories: 'Category & Product-type Sales',
   orders: 'Order Book (All Orders)',
   payments: 'Payments & Refunds',
   customers: 'Customer Report',
@@ -112,6 +114,7 @@ export const buildOverview = async ({ from, to, groupBy = 'day' }) => {
       const p = products.get(pk) || { name: it.name, slug: it.slug, units: 0, revenue: 0, image: it.image };
       p.units += Number(it.quantity || 0);
       p.revenue += Number(it.subtotal || 0);
+      p.categoryName = p.categoryName || it.categoryName || '';
       products.set(pk, p);
     }
     series.set(k, s);
@@ -135,6 +138,24 @@ export const buildOverview = async ({ from, to, groupBy = 'day' }) => {
   } else {
     filled.push(...[...series.values()].sort((a, b) => a.period.localeCompare(b.period)));
   }
+
+  // Category mix (legacy orders without a category snapshot are resolved from the product)
+  const needCat = [...products.entries()].filter(([, p]) => !p.categoryName).map(([id]) => id);
+  if (needCat.length) {
+    const docs = await Product.find({ _id: { $in: needCat } }).select('category').populate('category', 'name').lean();
+    docs.forEach((d) => {
+      const p = products.get(String(d._id));
+      if (p) p.categoryName = d.category?.name || '';
+    });
+  }
+  const catMap = new Map();
+  products.forEach((p) => {
+    const key = p.categoryName || 'Uncategorised';
+    const c = catMap.get(key) || { name: key, units: 0, revenue: 0 };
+    c.units += p.units;
+    c.revenue += p.revenue;
+    catMap.set(key, c);
+  });
 
   const statusBreakdown = {};
   allInRange.forEach((o) => {
@@ -163,6 +184,7 @@ export const buildOverview = async ({ from, to, groupBy = 'day' }) => {
     },
     series: filled.map((s) => ({ ...s, revenue: round2(s.revenue) })),
     topProducts: [...products.values()].sort((a, b) => b.revenue - a.revenue).slice(0, 10).map((p) => ({ ...p, revenue: round2(p.revenue) })),
+    categories: [...catMap.values()].sort((a, b) => b.revenue - a.revenue).map((c) => ({ ...c, revenue: round2(c.revenue) })),
     states: [...states.values()].sort((a, b) => b.revenue - a.revenue).slice(0, 15).map((s) => ({ ...s, revenue: round2(s.revenue) })),
     paymentMix: Object.entries(payMix).map(([method, v]) => ({ method, orders: v.orders, amount: round2(v.amount) })),
     statusBreakdown,
@@ -188,7 +210,7 @@ export const buildReport = async (type, { from, to }) => {
     business: settings.business?.toObject ? settings.business.toObject() : settings.business,
   };
 
-  const builders = { sales, gst, hsn, products, orders, payments, customers, statewise, inventory };
+  const builders = { sales, gst, hsn, products, categories, orders, payments, customers, statewise, inventory };
   const result = await builders[type]({ range, settings });
   return { ...meta, ...result };
 };
@@ -544,14 +566,10 @@ const buildHsnRows = (orders) => {
     .sort((a, b) => a.supply.localeCompare(b.supply) || a.hsn.localeCompare(b.hsn));
 };
 
-const hsnDescription = (hsn = '') =>
-  ({
-    3303: 'Perfumes and toilet waters',
-    3304: 'Beauty / skin-care preparations',
-    3305: 'Hair preparations',
-    3307: 'Shaving & other toilet preparations',
-    3401: 'Soap & cleansing preparations',
-  })[String(hsn).slice(0, 4)] || 'Cosmetic products';
+const hsnDescription = (hsn = '') => {
+  const code = String(hsn);
+  return HSN_DESCRIPTIONS[code] || HSN_DESCRIPTIONS[code.slice(0, 4)] || (code.startsWith('99') ? 'Services' : 'Goods');
+};
 
 const hsnSheet = (rows, name = 'HSN Summary') => ({
   name,
@@ -599,6 +617,8 @@ const products = async ({ range, settings }) => {
         variant: it.variant?.title || 'Standard',
         sku: it.variant?.sku || it.sku || '',
         hsn: it.hsnCode || l.hsnCode || '',
+        category: it.categoryName || '',
+        productType: it.productType || '',
         orders: 0,
         units: 0,
         gross: 0,
@@ -618,14 +638,17 @@ const products = async ({ range, settings }) => {
     });
   });
   const ids = [...new Set([...map.values()].map((r) => r.productId))];
-  const stockDocs = await Product.find({ _id: { $in: ids } }).select('stock variants').lean();
+  const stockDocs = await Product.find({ _id: { $in: ids } }).select('name stock variants productType hsnCode category').populate('category', 'name productType hsnCode').lean();
   const stockMap = new Map(stockDocs.map((p) => [String(p._id), p]));
   const rows = [...map.values()]
     .map((r) => {
       const p = stockMap.get(r.productId);
       const stock = r.sku && p?.variants?.length ? p.variants.find((v) => v.sku === r.sku)?.stock ?? p?.stock : p?.stock;
+      const type = r.productType || (p ? inferProductType(p, p.category) : '');
       return {
         ...r,
+        category: r.category || p?.category?.name || '—',
+        productType: PRODUCT_TYPES[type]?.label || type || '—',
         gross: round2(r.gross),
         discount: round2(r.discount),
         taxable: round2(r.taxable),
@@ -648,13 +671,89 @@ const products = async ({ range, settings }) => {
       {
         name: 'Product Sales',
         columns: [
-          text('Product', 'name', 32), text('Variant', 'variant', 12), text('SKU', 'sku', 16), text('HSN', 'hsn', 8), int('Orders', 'orders', 8), int('Units', 'units', 8),
+          text('Product', 'name', 32), text('Variant', 'variant', 12), text('SKU', 'sku', 16), text('Category', 'category', 16), text('Type', 'productType', 16), text('HSN', 'hsn', 8), int('Orders', 'orders', 8), int('Units', 'units', 8),
           money('Gross', 'gross'), money('Discount', 'discount', 11), money('Taxable', 'taxable'), money('GST', 'tax', 11), money('Net Revenue', 'net'),
           money('Avg. Price', 'avgPrice', 11), int('Current Stock', 'stock', 11),
         ],
         rows,
         totals: t,
       },
+    ],
+  };
+};
+
+// ───────────── Category & product-type sales ─────────────
+const categories = async ({ range, settings }) => {
+  const list = await Order.find({ createdAt: { $gte: range.from, $lte: range.to }, ...VALID_SALE_FILTER }).lean();
+  // Older orders (before category snapshots existed) are resolved from the current product record
+  const missing = new Set();
+  list.forEach((o) => (o.items || []).forEach((it) => !it.categoryName && missing.add(String(it.product))));
+  const docs = missing.size
+    ? await Product.find({ _id: { $in: [...missing] } }).select('name productType hsnCode category').populate('category', 'name productType hsnCode').lean()
+    : [];
+  const lookup = new Map(docs.map((p) => [String(p._id), p]));
+
+  const byCat = new Map();
+  const byType = new Map();
+  const add = (map, key, label, extra, it, l) => {
+    const r = map.get(key) || { name: label, ...extra, orders: new Set(), units: 0, gross: 0, discount: 0, taxable: 0, tax: 0, net: 0 };
+    r.orders.add(it.__order);
+    r.units += Number(it.quantity || 0);
+    r.gross += Number(it.subtotal || 0);
+    r.discount += Number(l.discount || 0);
+    r.taxable += Number(l.taxableValue || 0);
+    r.tax += Number(l.cgst || 0) + Number(l.sgst || 0) + Number(l.igst || 0);
+    r.net += Number(l.total ?? it.subtotal);
+    map.set(key, r);
+  };
+
+  list.forEach((o) => {
+    const t = taxOf(o, settings);
+    (o.items || []).forEach((it, idx) => {
+      const l = t.lines?.[idx] || {};
+      const p = lookup.get(String(it.product));
+      const catName = it.categoryName || p?.category?.name || 'Uncategorised';
+      const type = it.productType || (p ? inferProductType(p, p.category) : 'GENERAL');
+      const typeLabel = PRODUCT_TYPES[type]?.label || type;
+      const tagged = { ...it, __order: o.orderNumber };
+      add(byCat, catName, catName, { productType: typeLabel }, tagged, l);
+      add(byType, type, typeLabel, { hsn: it.hsnCode || l.hsnCode || '' }, tagged, l);
+    });
+  });
+
+  const finish = (map) => {
+    const rows = [...map.values()]
+      .map((r) => ({
+        ...r,
+        orders: r.orders.size,
+        gross: round2(r.gross),
+        discount: round2(r.discount),
+        taxable: round2(r.taxable),
+        tax: round2(r.tax),
+        net: round2(r.net),
+      }))
+      .sort((a, b) => b.net - a.net);
+    const total = rows.reduce((s, r) => s + r.net, 0) || 1;
+    rows.forEach((r) => (r.share = round2(r.net / total)));
+    return rows;
+  };
+  const catRows = finish(byCat);
+  const typeRows = finish(byType);
+  const metricCols = () => [
+    int('Orders', 'orders', 8), int('Units', 'units', 8), money('Gross', 'gross'), money('Discount', 'discount', 11),
+    money('Taxable', 'taxable'), money('GST', 'tax', 11), money('Net Revenue', 'net'), pct('Share', 'share'),
+  ];
+  const t = sumBy(catRows, ['units', 'gross', 'discount', 'taxable', 'tax', 'net']);
+  return {
+    kpis: [
+      { label: 'Categories', value: catRows.length, type: 'int' },
+      { label: 'Product Types', value: typeRows.length, type: 'int' },
+      { label: 'Units', value: t.units, type: 'int' },
+      { label: 'Net Revenue', value: t.net, type: 'money' },
+    ],
+    sheets: [
+      { name: 'By Category', columns: [text('Category', 'name', 28), text('Type', 'productType', 18), ...metricCols()], rows: catRows, totals: t },
+      { name: 'By Product Type', columns: [text('Product Type', 'name', 24), text('HSN', 'hsn', 8), ...metricCols()], rows: typeRows, totals: sumBy(typeRows, ['units', 'gross', 'discount', 'taxable', 'tax', 'net']) },
     ],
   };
 };
@@ -870,23 +969,25 @@ const statewise = async ({ range, settings }) => {
 };
 
 // ───────────── Inventory ─────────────
-const inventory = async () => {
-  const list = await Product.find({ status: { $ne: 'ARCHIVED' } }).populate('category', 'name').sort({ name: 1 }).lean();
+const inventory = async ({ settings } = {}) => {
+  const list = await Product.find({ status: { $ne: 'ARCHIVED' } }).populate('category', 'name productType hsnCode gstRate').sort({ name: 1 }).lean();
   const rows = [];
   list.forEach((p) => {
     const price = p.salePrice && p.salePrice < p.price ? p.salePrice : p.price;
+    const tax = resolveTax(p, p.category, settings || {});
+    const type = PRODUCT_TYPES[tax.productType]?.label || tax.productType;
     if (p.variants?.length) {
       p.variants.forEach((v) => {
         const vp = v.salePrice && v.salePrice < v.price ? v.salePrice : v.price;
         rows.push({
-          name: p.name, variant: v.title, sku: v.sku, category: p.category?.name || '', hsn: p.hsnCode || '', status: p.status,
+          name: p.name, variant: v.title, sku: v.sku, category: p.category?.name || '', productType: type, hsn: tax.hsnCode, gstRate: tax.gstRate / 100, status: p.status,
           stock: v.stock, price: vp, value: round2(vp * v.stock), sold: p.totalSold || 0,
           alert: v.stock <= 0 ? 'OUT OF STOCK' : v.stock <= (p.lowStockThreshold ?? 5) ? 'LOW' : 'OK',
         });
       });
     } else {
       rows.push({
-        name: p.name, variant: 'Standard', sku: p.sku, category: p.category?.name || '', hsn: p.hsnCode || '', status: p.status,
+        name: p.name, variant: 'Standard', sku: p.sku, category: p.category?.name || '', productType: type, hsn: tax.hsnCode, gstRate: tax.gstRate / 100, status: p.status,
         stock: p.stock, price, value: round2(price * p.stock), sold: p.totalSold || 0,
         alert: p.stock <= 0 ? 'OUT OF STOCK' : p.stock <= (p.lowStockThreshold ?? 5) ? 'LOW' : 'OK',
       });
@@ -904,7 +1005,7 @@ const inventory = async () => {
       {
         name: 'Inventory',
         columns: [
-          text('Product', 'name', 32), text('Variant', 'variant', 12), text('SKU', 'sku', 18), text('Category', 'category', 16), text('HSN', 'hsn', 8),
+          text('Product', 'name', 32), text('Variant', 'variant', 12), text('SKU', 'sku', 18), text('Category', 'category', 16), text('Type', 'productType', 16), text('HSN', 'hsn', 8), pct('GST', 'gstRate', 7),
           text('Status', 'status', 9), int('Stock', 'stock', 8), money('Selling Price', 'price', 13), money('Stock Value', 'value', 14), int('Total Sold', 'sold', 10), text('Alert', 'alert', 13),
         ],
         rows,

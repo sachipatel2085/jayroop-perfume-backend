@@ -28,9 +28,11 @@ export const getPublicSettings = async (req, res, next) => {
         freeShippingThreshold: s.freeShippingThreshold ?? 999,
         flatShippingFee: s.flatShippingFee ?? 100,
         estimatedDeliveryText: s.estimatedDeliveryText,
+        surfaceDeliveryText: s.surfaceDeliveryText || s.estimatedDeliveryText,
         business: {
           brandName: b.brandName,
           tradeName: b.tradeName,
+          tagline: b.tagline,
           legalName: b.legalName,
           registrationNote: b.registrationNote,
           gstin: b.gstin,
@@ -93,6 +95,7 @@ export const updateSettings = async (req, res, next) => {
     if (body.freeShippingThreshold !== undefined) settings.freeShippingThreshold = num(body.freeShippingThreshold);
     if (body.flatShippingFee !== undefined) settings.flatShippingFee = num(body.flatShippingFee);
     if (body.estimatedDeliveryText !== undefined) settings.estimatedDeliveryText = String(body.estimatedDeliveryText).slice(0, 80);
+    if (body.surfaceDeliveryText !== undefined) settings.surfaceDeliveryText = String(body.surfaceDeliveryText).slice(0, 80);
 
     const strKeys = ['defaultMetaTitle', 'defaultMetaDescription', 'defaultMetaKeywords', 'googleSiteVerification', 'bingSiteVerification', 'googleAnalyticsId', 'metaPixelId', 'ogDefaultImage'];
     strKeys.forEach((k) => {
@@ -101,7 +104,7 @@ export const updateSettings = async (req, res, next) => {
 
     if (body.business && typeof body.business === 'object') {
       const b = pick(body.business, [
-        'brandName', 'tradeName', 'legalName', 'registrationNote', 'gstin', 'pan', 'udyamNumber', 'addressLine1', 'addressLine2',
+        'brandName', 'tradeName', 'tagline', 'legalName', 'registrationNote', 'gstin', 'pan', 'udyamNumber', 'addressLine1', 'addressLine2',
         'city', 'district', 'state', 'postalCode', 'country', 'phone', 'whatsapp', 'email', 'website', 'instagram', 'facebook', 'youtube',
       ]);
       if (b.gstin && !isValidGSTIN(b.gstin)) {
@@ -119,12 +122,14 @@ export const updateSettings = async (req, res, next) => {
 
     if (body.invoice && typeof body.invoice === 'object') {
       const inv = pick(body.invoice, [
-        'prefix', 'creditNotePrefix', 'pricesIncludeTax', 'defaultHsnCode', 'defaultGstRate', 'shippingGstRate', 'shippingSacCode',
+        'prefix', 'creditNotePrefix', 'pricesIncludeTax', 'defaultHsnCode', 'defaultGstRate', 'shippingTaxMode', 'shippingGstRate', 'shippingSacCode',
         'termsText', 'footerNote', 'signatoryName', 'autoGenerateForCodOn',
       ]);
       ['defaultGstRate', 'shippingGstRate'].forEach((k) => {
-        if (inv[k] !== undefined) inv[k] = Math.min(28, num(inv[k]));
+        if (inv[k] !== undefined) inv[k] = Math.min(40, Math.max(0, num(inv[k])));
       });
+      if (inv.shippingTaxMode !== undefined) inv.shippingTaxMode = inv.shippingTaxMode === 'FIXED' ? 'FIXED' : 'HIGHEST_ITEM_RATE';
+      if (inv.defaultHsnCode !== undefined) inv.defaultHsnCode = String(inv.defaultHsnCode).replace(/\D/g, '').slice(0, 8);
       if (inv.prefix !== undefined) inv.prefix = String(inv.prefix).replace(/[^A-Z0-9]/gi, '').toUpperCase().slice(0, 6) || 'JR';
       if (inv.creditNotePrefix !== undefined) inv.creditNotePrefix = String(inv.creditNotePrefix).replace(/[^A-Z0-9]/gi, '').toUpperCase().slice(0, 6) || 'CN';
       if (inv.pricesIncludeTax !== undefined) inv.pricesIncludeTax = true; // storefront prices are always MRP (tax inclusive)

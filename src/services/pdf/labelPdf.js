@@ -55,8 +55,8 @@ export const renderShippingLabelPdf = async (order, { settings = {} } = {}) => {
   // Header
   doc.save().rect(6, 6, W - 12, 44).fill(COLORS.noir).restore();
   if (hasLogo()) doc.image(LOGO_PATH, 14, 12, { width: 32, height: 32 });
-  doc.font(FONT.display).fontSize(15).fillColor(COLORS.gold).text('JAYRUP', 52, 16, { characterSpacing: 2 });
-  doc.font(FONT.regular).fontSize(6).fillColor('#CFC6B3').text('jayrup.in · care@jayrup.in', 52, 34);
+  doc.font(FONT.display).fontSize(15).fillColor(COLORS.gold).text(String(b.brandName || 'Jayrup').toUpperCase(), 52, 16, { characterSpacing: 2, width: 150, lineBreak: false });
+  doc.font(FONT.regular).fontSize(6).fillColor('#CFC6B3').text(`${String(b.website || 'jayrup.in').replace(/^https?:\/\//, '')} · ${b.email || 'care@jayrup.in'}`, 52, 34, { width: 150, lineBreak: false });
 
   // Payment type badge
   const badgeW = 104;

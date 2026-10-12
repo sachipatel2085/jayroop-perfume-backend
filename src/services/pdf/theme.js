@@ -109,7 +109,7 @@ export const value = (doc, text, x, y, opts = {}) => {
 };
 
 /** Brand header band used by invoice, label and reports */
-export const brandBand = (doc, { title, subtitle, height = 86, rightLines = [] } = {}) => {
+export const brandBand = (doc, { title, subtitle, height = 86, rightLines = [], brandName = 'Jayrup', tagline = '' } = {}) => {
   const w = doc.page.width;
   doc.save();
   doc.rect(0, 0, w, height).fill(COLORS.noir);
@@ -122,8 +122,11 @@ export const brandBand = (doc, { title, subtitle, height = 86, rightLines = [] }
     doc.image(LOGO_PATH, x, (height - 52) / 2, { width: 52, height: 52 });
     x += 62;
   }
-  doc.font(FONT.display).fontSize(21).fillColor(COLORS.gold).text('JAYRUP', x, height / 2 - 17, { characterSpacing: 3, lineBreak: false });
-  doc.font(FONT.medium).fontSize(7.4).fillColor('#CFC6B3').text('PIMPLES CREAM · AYURVEDIC SKINCARE · LUXURY PERFUMES', x, height / 2 + 9, { characterSpacing: 0.9, lineBreak: false });
+  const brand = String(brandName || 'Jayrup').toUpperCase();
+  doc.font(FONT.display).fontSize(brand.length > 12 ? 16 : 21).fillColor(COLORS.gold).text(brand, x, height / 2 - (tagline ? 17 : 11), { characterSpacing: 3, lineBreak: false, width: 260 });
+  if (tagline) {
+    doc.font(FONT.medium).fontSize(7.4).fillColor('#CFC6B3').text(String(tagline).toUpperCase(), x, height / 2 + 9, { characterSpacing: 0.9, lineBreak: false, width: 260 });
+  }
 
   const rx = w - 36 - 230;
   if (title) {

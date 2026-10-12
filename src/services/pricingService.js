@@ -2,6 +2,7 @@ import { Product } from '../models/Product.js';
 import { Coupon } from '../models/Coupon.js';
 import { Order } from '../models/Order.js';
 import { Setting } from '../models/Setting.js';
+import { resolveTax, isReturnable, isHazmat } from '../config/productTypes.js';
 
 /**
  * Single source of truth for cart / checkout pricing.
@@ -38,11 +39,10 @@ export const priceCart = async ({ items = [], couponCode = '', userId = null, pa
   }
 
   const productIds = [...new Set([...merged.values()].map((m) => m.productId))];
-  const products = await Product.find({ _id: { $in: productIds } });
+  const products = await Product.find({ _id: { $in: productIds } }).populate('category', 'name slug productType hsnCode gstRate');
   const byId = new Map(products.map((p) => [String(p._id), p]));
 
-  const defaultGst = store.invoice?.defaultGstRate ?? 18;
-  const defaultHsn = store.invoice?.defaultHsnCode || '3304';
+  let surfaceOnly = false;
 
   const lines = [];
   let subtotal = 0;
@@ -88,6 +88,11 @@ export const priceCart = async ({ items = [], couponCode = '', userId = null, pa
       );
     }
 
+    const category = product.category && typeof product.category === 'object' ? product.category : null;
+    const tax = resolveTax(product, category, store);
+    const returnable = isReturnable(product, category);
+    if (isHazmat(product, category)) surfaceOnly = true;
+
     const lineSubtotal = price * qty;
     subtotal += lineSubtotal;
     mrpTotal += mrp * qty;
@@ -99,8 +104,12 @@ export const priceCart = async ({ items = [], couponCode = '', userId = null, pa
       sku: variantSnapshot?.sku || product.sku,
       image: product.images?.find((i) => i.isPrimary)?.url || product.images?.[0]?.url || '',
       variant: variantSnapshot,
-      hsnCode: product.hsnCode || defaultHsn,
-      gstRate: typeof product.gstRate === 'number' ? product.gstRate : defaultGst,
+      category: category?._id || null,
+      categoryName: category?.name || '',
+      productType: tax.productType,
+      returnable,
+      hsnCode: tax.hsnCode,
+      gstRate: tax.gstRate,
       mrp,
       price,
       quantity: qty,
@@ -164,6 +173,9 @@ export const priceCart = async ({ items = [], couponCode = '', userId = null, pa
     freeShippingThreshold: threshold,
     amountToFreeShipping: subtotal > 0 && subtotal < threshold ? threshold - subtotal : 0,
     coupon,
+    // Perfumes & other flammables travel by surface → longer delivery promise
+    surfaceOnly,
+    estimatedDeliveryText: surfaceOnly ? store.surfaceDeliveryText || store.estimatedDeliveryText : store.estimatedDeliveryText,
     errors,
   };
 
@@ -186,6 +198,8 @@ const emptyResult = () => ({
   codFee: 0,
   total: 0,
   coupon: null,
+  surfaceOnly: false,
+  estimatedDeliveryText: '',
   errors: [],
 });
 

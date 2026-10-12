@@ -2,6 +2,29 @@ import { Category } from '../models/Category.js';
 import { Product } from '../models/Product.js';
 import { Redirect } from '../models/Redirect.js';
 import { logAdminAction } from '../utils/auditLogger.js';
+import { PRODUCT_TYPES } from '../config/productTypes.js';
+
+const slugifyCat = (v = '') =>
+  String(v)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/(^-|-$)+/g, '');
+
+// Whitelisted, normalised category input (tax / type defaults are inherited by every product in it)
+const categoryInput = (body = {}) => {
+  const d = {};
+  ['name', 'description', 'image', 'featured', 'status', 'seo', 'googleProductCategory'].forEach((k) => {
+    if (body[k] !== undefined) d[k] = body[k];
+  });
+  if (body.slug !== undefined) d.slug = slugifyCat(body.slug);
+  if (body.parent !== undefined) d.parent = body.parent || null;
+  if (body.sortOrder !== undefined) d.sortOrder = Number(body.sortOrder) || 0;
+  if (body.productType !== undefined) d.productType = PRODUCT_TYPES[body.productType] ? body.productType : '';
+  if (body.hsnCode !== undefined) d.hsnCode = String(body.hsnCode || '').replace(/\D/g, '').slice(0, 8);
+  if (body.gstRate !== undefined) d.gstRate = body.gstRate === '' || body.gstRate === null ? null : Math.min(40, Math.max(0, Number(body.gstRate) || 0));
+  if (d.status !== undefined && !['ACTIVE', 'INACTIVE'].includes(d.status)) delete d.status;
+  return d;
+};
 
 // @desc    Get all active categories with subcategories
 // @route   GET /api/v1/categories
@@ -16,7 +39,7 @@ export const getCategories = async (req, res, next) => {
         path: 'subcategories',
         match: query,
       })
-      .sort({ createdAt: 1 });
+      .sort({ sortOrder: 1, createdAt: 1 });
 
     res.status(200).json({
       success: true,
@@ -57,12 +80,9 @@ export const getCategoryBySlug = async (req, res, next) => {
 // @access  Private/Admin
 export const createCategory = async (req, res, next) => {
   try {
-    const { name, slug, parent, description, image, featured, status, seo } = req.body;
-
-    const formattedSlug = (slug || name)
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/(^-|-$)+/g, '');
+    const input = categoryInput(req.body);
+    if (!input.name) return res.status(400).json({ success: false, message: 'Category name is required' });
+    const formattedSlug = input.slug || slugifyCat(input.name);
 
     const existing = await Category.findOne({ slug: formattedSlug });
     if (existing) {
@@ -73,14 +93,14 @@ export const createCategory = async (req, res, next) => {
     }
 
     const category = await Category.create({
-      name,
+      description: '',
+      image: { url: '', publicId: '' },
+      featured: false,
+      status: 'ACTIVE',
+      seo: { metaTitle: '', metaDescription: '' },
+      ...input,
       slug: formattedSlug,
-      parent: parent || null,
-      description: description || '',
-      image: image || { url: '', publicId: '' },
-      featured: featured || false,
-      status: status || 'ACTIVE',
-      seo: seo || { metaTitle: '', metaDescription: '' },
+      parent: input.parent || null,
     });
 
     await logAdminAction({
@@ -114,14 +134,20 @@ export const updateCategory = async (req, res, next) => {
       });
     }
 
+    const input = categoryInput(req.body);
     const oldSlug = category.slug;
-    const newSlug = req.body.slug ? req.body.slug.toLowerCase().trim() : null;
-
+    const newSlug = input.slug || null;
+    if (input.parent && String(input.parent) === String(category._id)) {
+      return res.status(400).json({ success: false, message: 'A category cannot be its own parent' });
+    }
     if (newSlug && newSlug !== oldSlug) {
+      if (await Category.exists({ slug: newSlug, _id: { $ne: category._id } })) {
+        return res.status(400).json({ success: false, message: 'A category with this slug already exists' });
+      }
       await Redirect.registerRedirect(`/category/${oldSlug}`, `/category/${newSlug}`, 'CATEGORY');
     }
 
-    const updated = await Category.findByIdAndUpdate(req.params.id, req.body, {
+    const updated = await Category.findByIdAndUpdate(req.params.id, input, {
       new: true,
       runValidators: true,
     });
@@ -131,7 +157,7 @@ export const updateCategory = async (req, res, next) => {
       action: 'CATEGORY_UPDATED',
       resource: 'Category',
       resourceId: updated._id.toString(),
-      details: req.body,
+      details: input,
     });
 
     res.status(200).json({

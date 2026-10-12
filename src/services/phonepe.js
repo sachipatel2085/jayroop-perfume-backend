@@ -17,7 +17,7 @@
  *
  * ENV
  *   PHONEPE_ENV=SANDBOX | PRODUCTION
- *   PHONEPE_API_VERSION=v2 | v1                (default v2)
+ *   PHONEPE_API_VERSION=v2 | v1   (optional – auto: v2 when Client ID/Secret are set, v1 when only Merchant ID + Salt Key)
  *   PHONEPE_CLIENT_ID / PHONEPE_CLIENT_SECRET / PHONEPE_CLIENT_VERSION      (v2)
  *   PHONEPE_MERCHANT_ID / PHONEPE_SALT_KEY / PHONEPE_SALT_INDEX             (v1)
  *   PHONEPE_WEBHOOK_USERNAME / PHONEPE_WEBHOOK_PASSWORD                     (v2 webhook)
@@ -27,7 +27,13 @@ import crypto from 'crypto';
 
 const env = () => (process.env.PHONEPE_ENV || 'SANDBOX').toUpperCase();
 const isProd = () => env() === 'PRODUCTION';
-export const apiVersion = () => (process.env.PHONEPE_API_VERSION || 'v2').toLowerCase();
+export const apiVersion = () => {
+  const explicit = String(process.env.PHONEPE_API_VERSION || '').toLowerCase();
+  if (explicit === 'v1' || explicit === 'v2') return explicit;
+  if (process.env.PHONEPE_CLIENT_ID && process.env.PHONEPE_CLIENT_SECRET) return 'v2';
+  if (process.env.PHONEPE_MERCHANT_ID && process.env.PHONEPE_SALT_KEY) return 'v1';
+  return 'v2';
+};
 
 const HOSTS = {
   v2: {
@@ -406,23 +412,37 @@ export const verifyWebhook = (headers = {}, body = {}) => {
     };
   }
 
+  const hints = parseWebhookBody(body);
   const username = process.env.PHONEPE_WEBHOOK_USERNAME;
   const password = process.env.PHONEPE_WEBHOOK_PASSWORD;
-  if (!username || !password) return { valid: false, reason: 'WEBHOOK_CREDENTIALS_NOT_SET' };
+  if (!username || !password) return { valid: false, reason: 'WEBHOOK_CREDENTIALS_NOT_SET', ...hints };
 
   const received = String(headers.authorization || headers.Authorization || '')
     .replace(/^SHA256\s+/i, '')
     .trim()
     .toLowerCase();
+  if (!received) {
+    // HMAC-type webhooks carry x-phonepe-checksum-* headers instead of Authorization
+    const hmac = headers['x-phonepe-checksum-signature'] || headers['phonepe-checksum-signature'];
+    return { valid: false, reason: hmac ? 'HMAC_WEBHOOK_USE_SHA_TYPE' : 'NO_AUTH_HEADER', ...hints };
+  }
   const expected = sha256(`${username}:${password}`);
-  if (!safeEqual(received, expected)) return { valid: false };
+  if (!safeEqual(received, expected)) return { valid: false, reason: 'USERNAME_PASSWORD_MISMATCH', ...hints };
 
-  const payload = body?.payload || {};
+  return { valid: true, ...hints };
+};
+
+/**
+ * Extract identifiers from a v2 webhook body. Order events are wrapped in { event, payload },
+ * some refund callbacks are sent flat – both shapes are handled. These are only HINTS:
+ * the caller always re-confirms the state with PhonePe's status APIs before touching money.
+ */
+export const parseWebhookBody = (body = {}) => {
+  const payload = body?.payload && typeof body.payload === 'object' ? body.payload : body || {};
   return {
-    valid: true,
-    event: body?.event || body?.type || '',
-    merchantOrderId: payload.merchantOrderId || payload.originalMerchantOrderId,
-    merchantRefundId: payload.merchantRefundId,
+    event: String(body?.event || body?.type || ''),
+    merchantOrderId: payload.merchantOrderId || payload.originalMerchantOrderId || '',
+    merchantRefundId: payload.merchantRefundId || '',
     state: payload.state,
   };
 };

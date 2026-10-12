@@ -55,7 +55,7 @@ export const getAdminAnalytics = async (req, res, next) => {
       Product.countDocuments({ status: 'ACTIVE', $expr: { $lte: ['$stock', { $ifNull: ['$lowStockThreshold', 5] }] } }),
       Order.countDocuments({ orderStatus: { $in: ['PAID', 'PROCESSING'] } }),
       Order.countDocuments({ orderStatus: 'PENDING_PAYMENT', createdAt: { $gte: istStartOfDay(1) } }),
-      Order.countDocuments({ orderStatus: 'REFUND_REQUESTED' }),
+      Order.countDocuments({ $or: [{ orderStatus: 'REFUND_REQUESTED' }, { 'returnRequest.status': 'OPEN' }] }),
       Order.find().populate('user', 'name email').sort({ createdAt: -1 }).limit(8),
       Order.aggregate([
         { $match: { ...VALID_SALE_FILTER, createdAt: { $gte: istStartOfDay(13) } } },

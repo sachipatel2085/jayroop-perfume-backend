@@ -299,8 +299,22 @@ export const phonePeWebhook = async (req, res) => {
   try {
     const v = phonepe.verifyWebhook(req.headers, req.body);
     if (!v.valid) {
-      console.warn('[PhonePe Webhook] Rejected – invalid signature', v.reason || '');
-      return res.status(401).json({ success: false, message: 'Invalid webhook signature' });
+      // An unverified callback is treated only as a hint to re-check the order with PhonePe's
+      // Status API (authenticated with our own credentials). Nothing in the body is trusted, so a
+      // misconfigured webhook (e.g. HMAC type, wrong password) can never mark an order paid – but
+      // genuine payments still update instantly instead of waiting for the background checker.
+      console.warn(`[PhonePe Webhook] Unverified callback (${v.reason || 'invalid signature'}) – re-checking with Status API`);
+      if (v.merchantOrderId && !String(v.event).startsWith('pg.refund')) {
+        const order = await Order.findOne({
+          $or: [{ 'paymentInfo.merchantOrderId': v.merchantOrderId }, { 'paymentInfo.attemptIds': v.merchantOrderId }],
+          orderStatus: 'PENDING_PAYMENT',
+        });
+        const last = order?.paymentInfo?.lastCheckedAt ? new Date(order.paymentInfo.lastCheckedAt).getTime() : 0;
+        if (order && Date.now() - last > 20 * 1000) {
+          await syncPaymentStatus(order, { source: 'PHONEPE_WEBHOOK_UNVERIFIED', merchantOrderId: v.merchantOrderId }).catch(() => {});
+        }
+      }
+      return res.status(200).json({ success: true });
     }
 
     const event = String(v.event || '');

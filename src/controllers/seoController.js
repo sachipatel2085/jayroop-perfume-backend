@@ -1,3 +1,4 @@
+import { typeOf, inferProductType } from '../config/productTypes.js';
 import { Product } from '../models/Product.js';
 import { Category } from '../models/Category.js';
 import { Blog } from '../models/Blog.js';
@@ -103,13 +104,9 @@ Sitemap: ${base}/sitemap.xml
   return res.status(200).send(robots);
 };
 
-const googleCategory = (p) => {
-  const hsn = String(p.hsnCode || '').slice(0, 4);
-  const name = `${p.category?.name || ''} ${p.name}`.toLowerCase();
-  if (hsn === '3303' || /perfume|parfum|attar|fragrance|deo/.test(name)) return 'Health & Beauty > Personal Care > Cosmetics > Perfume & Cologne';
-  if (hsn === '3401' || /soap/.test(name)) return 'Health & Beauty > Personal Care > Cosmetics > Bath & Body > Bar Soap';
-  return 'Health & Beauty > Personal Care > Cosmetics > Skin Care';
-};
+// Category override (Admin › Categories) → product type default (config/productTypes.js)
+const googleCategory = (p) => p.category?.googleProductCategory || typeOf(inferProductType(p, p.category)).googleCategory;
+const GENDER = { MEN: 'male', WOMEN: 'female', UNISEX: 'unisex' };
 
 // @desc    Google Merchant Center RSS feed (variants become separate items with item_group_id)
 // @route   GET /google-merchant-feed.xml  |  GET /api/v1/seo/google-merchant-feed.xml
@@ -119,7 +116,7 @@ export const getGoogleMerchantFeed = async (req, res, next) => {
     const settings = await Setting.getStoreSettings();
     const threshold = Number(settings.freeShippingThreshold ?? 999);
     const fee = Number(settings.flatShippingFee ?? 100);
-    const products = await Product.find({ status: 'ACTIVE' }).populate('category', 'name').lean();
+    const products = await Product.find({ status: 'ACTIVE' }).populate('category', 'name productType hsnCode googleProductCategory').lean();
 
     const item = (p, { id, title, price, salePrice, stock, gtin, groupId, size, weight }) => {
       const sell = salePrice && salePrice < price ? salePrice : price;
@@ -141,10 +138,12 @@ export const getGoogleMerchantFeed = async (req, res, next) => {
       <g:mpn>${escapeXml(id)}</g:mpn>
       ${size ? `<g:size>${escapeXml(size)}</g:size>` : ''}
       ${weight ? `<g:shipping_weight>${weight} g</g:shipping_weight>` : ''}
-      <g:product_type>${escapeXml(p.category?.name || 'Skincare')}</g:product_type>
+      <g:product_type>${escapeXml([typeOf(inferProductType(p, p.category)).label, p.category?.name].filter(Boolean).join(' > '))}</g:product_type>
+      ${GENDER[p.gender] ? `<g:gender>${GENDER[p.gender]}</g:gender>` : ''}
       <g:google_product_category>${escapeXml(googleCategory(p))}</g:google_product_category>
       <g:shipping><g:country>IN</g:country><g:service>Standard</g:service><g:price>${sell >= threshold ? '0.00' : fee.toFixed(2)} INR</g:price></g:shipping>
-      ${(p.concerns || []).slice(0, 5).map((c, i) => `<g:custom_label_${i}>${escapeXml(c)}</g:custom_label_${i}>`).join('')}
+      <g:custom_label_0>${escapeXml(typeOf(inferProductType(p, p.category)).label)}</g:custom_label_0>
+      ${[p.fragrance?.family, p.fragrance?.concentration, ...(p.concerns || [])].filter(Boolean).slice(0, 4).map((c, i) => `<g:custom_label_${i + 1}>${escapeXml(c)}</g:custom_label_${i + 1}>`).join('')}
     </item>\n`;
     };
 

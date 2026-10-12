@@ -30,8 +30,9 @@ const contactInquirySchema = new mongoose.Schema(
       required: [true, 'Please select or provide an inquiry subject'],
       enum: [
         'Order & Tracking Inquiry',
-        'Product & Fragrance Consultation',
-        'Skincare Guidance',
+        'Product Question',
+        'Product & Fragrance Consultation', // legacy
+        'Skincare Guidance', // legacy
         'Wholesale & Corporate Gifting',
         'Return & Replacement Request',
         'Grievance & Feedback',

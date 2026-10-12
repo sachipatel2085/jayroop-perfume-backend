@@ -66,13 +66,22 @@ export const computeTaxBreakup = (order, settings) => {
     }
     pushLine({
       description: `${item.name}${item.variant?.title ? ` (${item.variant.title})` : ''}`,
-      hsnCode: item.hsnCode || inv.defaultHsnCode || '3304',
+      hsnCode: item.hsnCode || inv.defaultHsnCode || '',
       quantity: item.quantity,
       gross,
       lineDiscount: alloc,
       rate: typeof item.gstRate === 'number' ? item.gstRate : inv.defaultGstRate ?? 18,
     });
   });
+
+  // Shipping / COD handling is part of a composite supply of goods → by default taxed at the
+  // highest GST rate among the goods in the order (never under-pays when a cart mixes 5 % and 18 % items).
+  // Settings › Invoices › "Shipping GST" can switch to a fixed rate instead.
+  const itemRates = order.items.map((i) => (typeof i.gstRate === 'number' ? i.gstRate : Number(inv.defaultGstRate ?? 18)));
+  const chargeRate =
+    (inv.shippingTaxMode || 'HIGHEST_ITEM_RATE') === 'FIXED' || itemRates.length === 0
+      ? Number(inv.shippingGstRate ?? 18)
+      : Math.max(...itemRates);
 
   if (Number(order.shipping) > 0) {
     pushLine({
@@ -81,7 +90,7 @@ export const computeTaxBreakup = (order, settings) => {
       quantity: 1,
       gross: Number(order.shipping),
       lineDiscount: 0,
-      rate: inv.shippingGstRate ?? 18,
+      rate: chargeRate,
       isService: true,
     });
   }
@@ -92,7 +101,7 @@ export const computeTaxBreakup = (order, settings) => {
       quantity: 1,
       gross: Number(order.codFee),
       lineDiscount: 0,
-      rate: inv.shippingGstRate ?? 18,
+      rate: chargeRate,
       isService: true,
     });
   }
@@ -128,6 +137,7 @@ export const sellerSnapshot = (settings) => {
   return {
     brandName: b.brandName,
     tradeName: b.tradeName,
+    tagline: b.tagline,
     legalName: b.legalName,
     registrationNote: b.registrationNote,
     gstin: b.gstin,

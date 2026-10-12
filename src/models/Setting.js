@@ -27,11 +27,14 @@ const settingSchema = new mongoose.Schema(
     freeShippingThreshold: { type: Number, default: 999, min: 0 },
     flatShippingFee: { type: Number, default: 100, min: 0 },
     estimatedDeliveryText: { type: String, default: '7–10 business days', trim: true },
+    // Used when the bag contains a surface-only item (alcohol-based perfume, aerosol …)
+    surfaceDeliveryText: { type: String, default: '8–12 business days', trim: true },
 
     // ───────────── Business identity (printed on invoices, schema.org, footer) ─────────────
     business: {
       brandName: { type: String, default: 'Jayrup', trim: true },
-      tradeName: { type: String, default: 'Jayrup Pimples Cream', trim: true },
+      tradeName: { type: String, default: 'Jayrup', trim: true }, // must match the trade name on the GST certificate
+      tagline: { type: String, default: 'Skincare · Fragrances · Personal Care', trim: true, maxlength: 80 }, // printed on invoices & reports
       legalName: { type: String, default: 'FITJAYESH', trim: true },
       registrationNote: { type: String, default: 'MSME Registered', trim: true },
       gstin: { type: String, default: '', trim: true, uppercase: true },
@@ -59,14 +62,18 @@ const settingSchema = new mongoose.Schema(
       prefix: { type: String, default: 'JR', trim: true, uppercase: true, maxlength: 6 },
       creditNotePrefix: { type: String, default: 'CN', trim: true, uppercase: true, maxlength: 6 },
       pricesIncludeTax: { type: Boolean, default: true },
+      // Last-resort HSN – normally the product / category / product type supplies it
       defaultHsnCode: { type: String, default: '3304', trim: true },
-      defaultGstRate: { type: Number, default: 18, min: 0, max: 28 },
-      shippingGstRate: { type: Number, default: 18, min: 0, max: 28 },
+      defaultGstRate: { type: Number, default: 18, min: 0, max: 40 },
+      // HIGHEST_ITEM_RATE: shipping & COD charges follow the highest GST rate of the goods in the order
+      // (composite supply). FIXED: always use shippingGstRate.
+      shippingTaxMode: { type: String, enum: ['HIGHEST_ITEM_RATE', 'FIXED'], default: 'HIGHEST_ITEM_RATE' },
+      shippingGstRate: { type: Number, default: 18, min: 0, max: 40 },
       shippingSacCode: { type: String, default: '996812', trim: true },
       termsText: {
         type: String,
         default:
-          'Goods once sold are subject to our Return & Refund Policy available at jayrup.in/return-policy. Subject to Sabarkantha (Gujarat) jurisdiction.',
+          'Goods once sold are subject to our Return & Refund Policy available at jayrup.in/refund-return-policy. Subject to Sabarkantha (Gujarat) jurisdiction.',
         trim: true,
       },
       footerNote: {
@@ -85,19 +92,19 @@ const settingSchema = new mongoose.Schema(
     // ───────────── Global storefront SEO & webmaster ─────────────
     defaultMetaTitle: {
       type: String,
-      default: 'Jayrup | Pimples Cream, Ayurvedic Skincare & Luxury Perfumes Online India',
+      default: 'Jayrup | Skincare & Luxury Perfumes – Shop Online in India',
       trim: true,
     },
     defaultMetaDescription: {
       type: String,
       default:
-        'Shop Jayrup online – Ayurvedic-inspired Pimples Cream for acne & marks, skincare and long-lasting luxury perfumes. Made in India. Secure PhonePe & COD checkout, delivery across India.',
+        'Shop Jayrup online – effective skincare and long-lasting luxury perfumes, made in India. Genuine products, secure PhonePe & COD checkout, delivery across India.',
       trim: true,
     },
     defaultMetaKeywords: {
       type: String,
       default:
-        'jayrup, jayrup pimples cream, pimple cream, anti acne cream, acne marks cream, ayurvedic skincare, luxury perfume india, eau de parfum, jayrup perfume',
+        'jayrup, jayrup perfume, jayrup skincare, luxury perfume india, eau de parfum, long lasting perfume, skincare india, jayrup pimples cream',
       trim: true,
     },
     googleSiteVerification: { type: String, default: '', trim: true },
@@ -112,12 +119,40 @@ const settingSchema = new mongoose.Schema(
   }
 );
 
+// Values written by earlier versions that were specific to a single product. If the admin never
+// changed them, they are upgraded to the product-neutral defaults automatically (once).
+const LEGACY_DEFAULTS = [
+  ['business.tradeName', ['Jayrup Pimples Cream']],
+  ['defaultMetaTitle', ['Jayrup | Pimples Cream, Ayurvedic Skincare & Luxury Perfumes Online India']],
+  [
+    'defaultMetaDescription',
+    ['Shop Jayrup online – Ayurvedic-inspired Pimples Cream for acne & marks, skincare and long-lasting luxury perfumes. Made in India. Secure PhonePe & COD checkout, delivery across India.'],
+  ],
+  [
+    'defaultMetaKeywords',
+    ['jayrup, jayrup pimples cream, pimple cream, anti acne cream, acne marks cream, ayurvedic skincare, luxury perfume india, eau de parfum, jayrup perfume'],
+  ],
+  ['invoice.termsText', ['Goods once sold are subject to our Return & Refund Policy available at jayrup.in/return-policy. Subject to Sabarkantha (Gujarat) jurisdiction.']],
+];
+
 // Get-or-create singleton
 settingSchema.statics.getStoreSettings = async function () {
   let settings = await this.findOne({ key: 'store_settings' });
   if (!settings) {
     settings = await this.create({ key: 'store_settings', codEnabled: true });
+    return settings;
   }
+  const $set = {};
+  for (const [path, oldValues] of LEGACY_DEFAULTS) {
+    if (oldValues.includes(settings.get(path))) {
+      const fresh = this.schema.path(path)?.defaultValue;
+      if (fresh !== undefined) {
+        settings.set(path, fresh);
+        $set[path] = fresh;
+      }
+    }
+  }
+  if (Object.keys($set).length) await this.updateOne({ _id: settings._id }, { $set });
   return settings;
 };
 

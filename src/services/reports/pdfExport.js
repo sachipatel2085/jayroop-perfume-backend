@@ -24,6 +24,8 @@ export const renderReportPdf = async (report) => {
     title: report.title.toUpperCase(),
     subtitle: `PERIOD: ${report.from} → ${report.to}`,
     height: 78,
+    brandName: b.brandName,
+    tagline: b.tagline,
   });
   y += 10;
   doc
