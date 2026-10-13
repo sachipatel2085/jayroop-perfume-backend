@@ -31,6 +31,47 @@ const settingSchema = new mongoose.Schema(
     // Used when the bag contains a surface-only item (alcohol-based perfume, aerosol …)
     surfaceDeliveryText: { type: String, default: '8–12 business days', trim: true },
 
+    // ───────────── Advanced shipping (zones, pincodes, delivery promise) ─────────────
+    // freeShippingThreshold / flatShippingFee above stay the "simple" defaults. Turn on zone rates to
+    // charge differently inside your state, across India and in remote regions.
+    shipping: {
+      freeShippingEnabled: { type: Boolean, default: true },
+      additionalItemFee: { type: Number, default: 0, min: 0 }, // charged per extra unit after the first
+      dispatchDays: { type: Number, default: 1, min: 0, max: 15 }, // packing / handover time
+      surfaceExtraDays: { type: Number, default: 2, min: 0, max: 15 }, // extra days for surface-only items
+      zoneRatesEnabled: { type: Boolean, default: false },
+      zones: {
+        type: [
+          {
+            _id: false,
+            key: { type: String, enum: ['LOCAL', 'NATIONAL', 'REMOTE'], required: true },
+            label: { type: String, trim: true },
+            fee: { type: Number, min: 0, default: 0 },
+            freeAbove: { type: Number, min: 0, default: null }, // null → use the store-wide free-shipping limit
+            minDays: { type: Number, min: 0, default: 3 },
+            maxDays: { type: Number, min: 0, default: 7 },
+            codAvailable: { type: Boolean, default: true },
+          },
+        ],
+        default: () => [
+          { key: 'LOCAL', label: 'Within home state', fee: 60, freeAbove: null, minDays: 2, maxDays: 4, codAvailable: true },
+          { key: 'NATIONAL', label: 'Rest of India', fee: 100, freeAbove: null, minDays: 4, maxDays: 7, codAvailable: true },
+          { key: 'REMOTE', label: 'North-East, J&K, Ladakh & islands', fee: 150, freeAbove: null, minDays: 7, maxDays: 12, codAvailable: true },
+        ],
+      },
+      remoteStates: {
+        type: [String],
+        default: () => [
+          'Arunachal Pradesh', 'Assam', 'Manipur', 'Meghalaya', 'Mizoram', 'Nagaland', 'Sikkim', 'Tripura',
+          'Jammu and Kashmir', 'Ladakh', 'Andaman and Nicobar Islands', 'Lakshadweep',
+        ],
+      },
+      // PIN codes / prefixes (e.g. "744" for all of Andaman) – checked at checkout
+      blockedPincodes: { type: [String], default: () => [] }, // we don't deliver here
+      codBlockedPincodes: { type: [String], default: () => [] }, // prepaid only here
+      shippingPolicyNote: { type: String, default: '', trim: true, maxlength: 300 }, // shown at checkout
+    },
+
     // ───────────── Business identity (printed on invoices, schema.org, footer) ─────────────
     business: {
       brandName: { type: String, default: 'Jayrup', trim: true },
@@ -62,7 +103,12 @@ const settingSchema = new mongoose.Schema(
     invoice: {
       prefix: { type: String, default: 'JR', trim: true, uppercase: true, maxlength: 6 },
       creditNotePrefix: { type: String, default: 'CN', trim: true, uppercase: true, maxlength: 6 },
+      // true  → product prices are GST-inclusive (MRP); GST is back-calculated on the invoice
+      // false → product prices are before GST; GST is added at checkout (B2B / future pricing)
       pricesIncludeTax: { type: Boolean, default: true },
+      // REGULAR → Tax Invoice with CGST/SGST/IGST · COMPOSITION → Bill of Supply, no GST collected
+      gstScheme: { type: String, enum: ['REGULAR', 'COMPOSITION'], default: 'REGULAR' },
+      showGstinOnSite: { type: Boolean, default: true }, // footer, contact page, checkout
       // Last-resort HSN – normally the product / category / product type supplies it
       defaultHsnCode: { type: String, default: '3304', trim: true },
       defaultGstRate: { type: Number, default: 18, min: 0, max: 40 },

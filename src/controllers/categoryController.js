@@ -61,8 +61,11 @@ export const getCategories = async (req, res, next) => {
 // @access  Public
 export const getCategoryBySlug = async (req, res, next) => {
   try {
-    const category = await Category.findOne({ slug: req.params.slug })
-      .populate('subcategories')
+    // Storefront: active categories only (admins use ?all=true to open inactive ones)
+    const query = { slug: String(req.params.slug).toLowerCase() };
+    if (req.query.all !== 'true') query.status = 'ACTIVE';
+    const category = await Category.findOne(query)
+      .populate({ path: 'subcategories', match: { status: 'ACTIVE' } })
       .populate('parent', 'name slug');
 
     if (!category) {

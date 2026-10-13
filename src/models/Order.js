@@ -88,7 +88,7 @@ const invoiceSchema = new mongoose.Schema(
     sequence: Number,
     financialYear: String,
     date: Date,
-    type: { type: String, enum: ['TAX_INVOICE', 'INVOICE'], default: 'TAX_INVOICE' },
+    type: { type: String, enum: ['TAX_INVOICE', 'BILL_OF_SUPPLY', 'INVOICE'], default: 'TAX_INVOICE' },
     status: { type: String, enum: ['ISSUED', 'CANCELLED'], default: 'ISSUED' },
     seller: { type: mongoose.Schema.Types.Mixed, default: {} }, // business snapshot at issue time
     placeOfSupply: String,
@@ -147,6 +147,10 @@ const orderSchema = new mongoose.Schema(
     discount: { type: Number, default: 0, min: 0 },
     shipping: { type: Number, default: 0, min: 0 }, // shipping charge only
     codFee: { type: Number, default: 0, min: 0 },
+    // GST added on top of the prices (only when Settings › GST › "Prices include GST" is OFF)
+    taxAmount: { type: Number, default: 0, min: 0 },
+    pricesIncludeTax: { type: Boolean, default: true }, // snapshot of the pricing mode used for this order
+    shippingZone: { type: String, default: '' }, // LOCAL | NATIONAL | REMOTE (zone rates) – '' in simple mode
     total: { type: Number, required: true, min: 0 },
     appliedCoupon: {
       code: { type: String, default: null },

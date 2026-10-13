@@ -3,6 +3,8 @@ import { Coupon } from '../models/Coupon.js';
 import { Order } from '../models/Order.js';
 import { Setting } from '../models/Setting.js';
 import { resolveTax, isReturnable, isHazmat } from '../config/productTypes.js';
+import { computeShipping } from './shippingService.js';
+import { isValidGSTIN, round2 } from '../utils/helpers.js';
 
 /**
  * Single source of truth for cart / checkout pricing.
@@ -13,9 +15,10 @@ import { resolveTax, isReturnable, isHazmat } from '../config/productTypes.js';
  * @param {string}   opts.couponCode
  * @param {string}   opts.userId         used for per-user coupon limits
  * @param {string}   opts.paymentMethod  'ONLINE' | 'COD'
+ * @param {Object}   opts.shippingAddress { state, postalCode } – optional; enables zone rates & PIN checks
  * @param {boolean}  opts.strict         throw on any problem (used when creating an order)
  */
-export const priceCart = async ({ items = [], couponCode = '', userId = null, paymentMethod = 'ONLINE', strict = false, settings = null }) => {
+export const priceCart = async ({ items = [], couponCode = '', userId = null, paymentMethod = 'ONLINE', strict = false, settings = null, shippingAddress = null }) => {
   const store = settings || (await Setting.getStoreSettings());
   const errors = [];
 
@@ -155,11 +158,46 @@ export const priceCart = async ({ items = [], couponCode = '', userId = null, pa
   }
 
   // ───── Shipping & COD fee ─────
-  const threshold = Number(store.freeShippingThreshold ?? 999);
-  const flatFee = Number(store.flatShippingFee ?? 100);
-  const shipping = subtotal > 0 && subtotal < threshold ? flatFee : 0;
+  const units = lines.reduce((s, l) => s + l.quantity, 0);
+  const ship = computeShipping({ store, subtotal, units, address: shippingAddress, surfaceOnly });
+  const shipping = ship.shipping;
   const codFee = paymentMethod === 'COD' ? Number(store.codExtraFee || 0) : 0;
-  const total = Math.max(0, Math.round((subtotal - discount + shipping + codFee) * 100) / 100);
+  if (shippingAddress?.postalCode && !ship.deliverable) {
+    errors.push(`Sorry, we don't deliver to PIN code ${shippingAddress.postalCode} yet.`);
+  }
+  if (paymentMethod === 'COD' && shippingAddress?.state && !ship.codAvailableForAddress) {
+    errors.push(`${ship.codUnavailableReason} Please pay online with PhonePe.`);
+  }
+
+  // ───── GST ─────
+  // Inclusive (default): prices already contain GST → nothing is added; we only report the GST
+  //   included, for display. Exclusive: GST is added on top of goods + shipping + COD charges.
+  // Not GST-registered or Composition scheme → no GST is collected.
+  const inv = store.invoice || {};
+  const gstApplicable = isValidGSTIN(store.business?.gstin) && (inv.gstScheme || 'REGULAR') === 'REGULAR';
+  const pricesIncludeTax = inv.pricesIncludeTax !== false;
+  let taxAmount = 0; // added on top (exclusive mode)
+  let includedTax = 0; // already inside the prices (inclusive mode)
+  if (gstApplicable && lines.length) {
+    const rates = lines.map((l) => Number(l.gstRate ?? inv.defaultGstRate ?? 18));
+    const chargeRate = (inv.shippingTaxMode || 'HIGHEST_ITEM_RATE') === 'FIXED' ? Number(inv.shippingGstRate ?? 18) : Math.max(...rates);
+    let left = discount;
+    const parts = lines.map((l, i) => {
+      const alloc = i === lines.length - 1 ? left : subtotal > 0 ? round2((discount * l.subtotal) / subtotal) : 0;
+      left = round2(left - alloc);
+      return { net: Math.max(0, l.subtotal - alloc), rate: rates[i] };
+    });
+    if (shipping > 0) parts.push({ net: shipping, rate: chargeRate });
+    if (codFee > 0) parts.push({ net: codFee, rate: chargeRate });
+    for (const { net, rate } of parts) {
+      if (pricesIncludeTax) includedTax += net - net / (1 + rate / 100);
+      else taxAmount += round2((net * rate) / 100); // rounded per line, exactly like the invoice
+    }
+    taxAmount = round2(taxAmount);
+    includedTax = round2(includedTax);
+  }
+
+  const total = Math.max(0, round2(subtotal - discount + shipping + codFee + taxAmount));
 
   const result = {
     items: lines,
@@ -169,13 +207,23 @@ export const priceCart = async ({ items = [], couponCode = '', userId = null, pa
     discount,
     shipping,
     codFee,
+    taxAmount,
+    includedTax,
+    pricesIncludeTax,
+    gstApplicable,
     total,
-    freeShippingThreshold: threshold,
-    amountToFreeShipping: subtotal > 0 && subtotal < threshold ? threshold - subtotal : 0,
+    freeShippingThreshold: ship.freeShippingThreshold,
+    amountToFreeShipping: ship.amountToFreeShipping,
+    shippingZone: ship.shippingZone,
+    shippingZoneLabel: ship.shippingZoneLabel,
+    shippingEstimated: ship.shippingEstimated,
+    deliverable: ship.deliverable,
+    codAvailableForAddress: ship.codAvailableForAddress,
+    shippingPolicyNote: ship.shippingPolicyNote,
     coupon,
     // Perfumes & other flammables travel by surface → longer delivery promise
     surfaceOnly,
-    estimatedDeliveryText: surfaceOnly ? store.surfaceDeliveryText || store.estimatedDeliveryText : store.estimatedDeliveryText,
+    estimatedDeliveryText: ship.estimatedDeliveryText,
     errors,
   };
 
@@ -196,6 +244,10 @@ const emptyResult = () => ({
   discount: 0,
   shipping: 0,
   codFee: 0,
+  taxAmount: 0,
+  includedTax: 0,
+  pricesIncludeTax: true,
+  gstApplicable: false,
   total: 0,
   coupon: null,
   surfaceOnly: false,

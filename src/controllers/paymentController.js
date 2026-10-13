@@ -112,6 +112,7 @@ export const checkout = (forcedMethod = null) => async (req, res, next) => {
       paymentMethod,
       strict: true,
       settings,
+      shippingAddress,
     });
 
     if (paymentMethod === 'COD') {
@@ -132,6 +133,9 @@ export const checkout = (forcedMethod = null) => async (req, res, next) => {
       discount: pricing.discount,
       shipping: pricing.shipping,
       codFee: pricing.codFee,
+      taxAmount: pricing.taxAmount,
+      pricesIncludeTax: pricing.pricesIncludeTax,
+      shippingZone: pricing.shippingZone || '',
       total: pricing.total,
       appliedCoupon: pricing.coupon ? { code: pricing.coupon.code, discountAmount: pricing.coupon.discountAmount } : undefined,
       shippingAddress: { ...shippingAddress, email: shippingAddress.email || req.user.email },
@@ -248,6 +252,7 @@ export const retryPayment = async (req, res, next) => {
       couponCode: order.appliedCoupon?.code,
       userId: req.user._id,
       paymentMethod: 'ONLINE',
+      shippingAddress: order.shippingAddress,
     });
     const blocking = pricing.errors.filter((e) => !e.startsWith('Coupon'));
     if (blocking.length) throw httpError(400, blocking.join(' '));

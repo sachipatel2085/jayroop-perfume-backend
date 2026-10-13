@@ -14,6 +14,10 @@ export const getPublicSettings = async (req, res, next) => {
     const s = await Setting.getStoreSettings();
     const gateway = publicGatewayInfo();
     const b = s.business || {};
+    const inv = s.invoice || {};
+    const sh = s.shipping || {};
+    const gstRegistered = isValidGSTIN(b.gstin);
+    const showGstin = inv.showGstinOnSite !== false && gstRegistered;
     res.set('Cache-Control', 'public, max-age=120');
     res.status(200).json({
       success: true,
@@ -29,13 +33,28 @@ export const getPublicSettings = async (req, res, next) => {
         flatShippingFee: s.flatShippingFee ?? 100,
         estimatedDeliveryText: s.estimatedDeliveryText,
         surfaceDeliveryText: s.surfaceDeliveryText || s.estimatedDeliveryText,
+        shipping: {
+          freeShippingEnabled: sh.freeShippingEnabled !== false,
+          zoneRatesEnabled: Boolean(sh.zoneRatesEnabled),
+          dispatchDays: sh.dispatchDays ?? 1,
+          additionalItemFee: sh.additionalItemFee || 0,
+          zones: sh.zoneRatesEnabled ? (sh.zones || []).map((z) => ({ key: z.key, label: z.label, fee: z.fee, freeAbove: z.freeAbove, minDays: z.minDays, maxDays: z.maxDays, codAvailable: z.codAvailable })) : [],
+          shippingPolicyNote: sh.shippingPolicyNote || '',
+        },
+        // GST display: prices inclusive (MRP) or GST added at checkout
+        gst: {
+          pricesIncludeTax: inv.pricesIncludeTax !== false,
+          applicable: gstRegistered && (inv.gstScheme || 'REGULAR') === 'REGULAR',
+          scheme: gstRegistered ? inv.gstScheme || 'REGULAR' : 'UNREGISTERED',
+          gstin: showGstin ? b.gstin : '',
+        },
         business: {
           brandName: b.brandName,
           tradeName: b.tradeName,
           tagline: b.tagline,
           legalName: b.legalName,
           registrationNote: b.registrationNote,
-          gstin: b.gstin,
+          gstin: showGstin ? b.gstin : '',
           addressLine1: b.addressLine1,
           addressLine2: b.addressLine2,
           city: b.city,
@@ -97,6 +116,43 @@ export const updateSettings = async (req, res, next) => {
     if (body.estimatedDeliveryText !== undefined) settings.estimatedDeliveryText = String(body.estimatedDeliveryText).slice(0, 80);
     if (body.surfaceDeliveryText !== undefined) settings.surfaceDeliveryText = String(body.surfaceDeliveryText).slice(0, 80);
 
+    if (body.shipping && typeof body.shipping === 'object') {
+      const sh = body.shipping;
+      const cur = settings.shipping || {};
+      const pins = (v) =>
+        [...new Set((Array.isArray(v) ? v : String(v || '').split(/[\s,;]+/)).map((x) => String(x).replace(/\D/g, '')).filter((x) => x.length >= 2 && x.length <= 6))].slice(0, 2000);
+      if (sh.freeShippingEnabled !== undefined) cur.freeShippingEnabled = Boolean(sh.freeShippingEnabled);
+      if (sh.additionalItemFee !== undefined) cur.additionalItemFee = num(sh.additionalItemFee);
+      if (sh.dispatchDays !== undefined) cur.dispatchDays = Math.min(15, num(sh.dispatchDays));
+      if (sh.surfaceExtraDays !== undefined) cur.surfaceExtraDays = Math.min(15, num(sh.surfaceExtraDays));
+      if (sh.zoneRatesEnabled !== undefined) cur.zoneRatesEnabled = Boolean(sh.zoneRatesEnabled);
+      if (sh.shippingPolicyNote !== undefined) cur.shippingPolicyNote = String(sh.shippingPolicyNote || '').trim().slice(0, 300);
+      if (sh.blockedPincodes !== undefined) cur.blockedPincodes = pins(sh.blockedPincodes);
+      if (sh.codBlockedPincodes !== undefined) cur.codBlockedPincodes = pins(sh.codBlockedPincodes);
+      if (Array.isArray(sh.remoteStates)) {
+        const valid = new Set(INDIA_STATES.map((st) => st.name));
+        cur.remoteStates = sh.remoteStates.filter((st) => valid.has(st));
+      }
+      if (Array.isArray(sh.zones)) {
+        const keys = ['LOCAL', 'NATIONAL', 'REMOTE'];
+        cur.zones = keys.map((key) => {
+          const z = sh.zones.find((x) => x?.key === key) || (cur.zones || []).find((x) => x.key === key) || {};
+          const minDays = Math.min(60, num(z.minDays));
+          return {
+            key,
+            label: String(z.label || key).trim().slice(0, 60),
+            fee: num(z.fee),
+            freeAbove: z.freeAbove === '' || z.freeAbove === null || z.freeAbove === undefined ? null : num(z.freeAbove),
+            minDays,
+            maxDays: Math.max(minDays, Math.min(60, num(z.maxDays))),
+            codAvailable: z.codAvailable !== false,
+          };
+        });
+      }
+      settings.shipping = cur;
+      settings.markModified('shipping');
+    }
+
     const strKeys = ['defaultMetaTitle', 'defaultMetaDescription', 'defaultMetaKeywords', 'googleSiteVerification', 'bingSiteVerification', 'googleAnalyticsId', 'metaPixelId', 'ogDefaultImage'];
     strKeys.forEach((k) => {
       if (body[k] !== undefined) settings[k] = String(body[k] || '').trim();
@@ -122,7 +178,7 @@ export const updateSettings = async (req, res, next) => {
 
     if (body.invoice && typeof body.invoice === 'object') {
       const inv = pick(body.invoice, [
-        'prefix', 'creditNotePrefix', 'pricesIncludeTax', 'defaultHsnCode', 'defaultGstRate', 'shippingTaxMode', 'shippingGstRate', 'shippingSacCode',
+        'prefix', 'creditNotePrefix', 'pricesIncludeTax', 'gstScheme', 'showGstinOnSite', 'defaultHsnCode', 'defaultGstRate', 'shippingTaxMode', 'shippingGstRate', 'shippingSacCode',
         'termsText', 'footerNote', 'signatoryName', 'autoGenerateForCodOn',
       ]);
       ['defaultGstRate', 'shippingGstRate'].forEach((k) => {
@@ -132,7 +188,11 @@ export const updateSettings = async (req, res, next) => {
       if (inv.defaultHsnCode !== undefined) inv.defaultHsnCode = String(inv.defaultHsnCode).replace(/\D/g, '').slice(0, 8);
       if (inv.prefix !== undefined) inv.prefix = String(inv.prefix).replace(/[^A-Z0-9]/gi, '').toUpperCase().slice(0, 6) || 'JR';
       if (inv.creditNotePrefix !== undefined) inv.creditNotePrefix = String(inv.creditNotePrefix).replace(/[^A-Z0-9]/gi, '').toUpperCase().slice(0, 6) || 'CN';
-      if (inv.pricesIncludeTax !== undefined) inv.pricesIncludeTax = true; // storefront prices are always MRP (tax inclusive)
+      // Inclusive = product prices are MRP incl. GST (B2C, today). Exclusive = GST added at checkout.
+      // Only new orders are affected – every order stores the mode it was priced with.
+      if (inv.pricesIncludeTax !== undefined) inv.pricesIncludeTax = inv.pricesIncludeTax !== false && inv.pricesIncludeTax !== 'false';
+      if (inv.gstScheme !== undefined) inv.gstScheme = inv.gstScheme === 'COMPOSITION' ? 'COMPOSITION' : 'REGULAR';
+      if (inv.showGstinOnSite !== undefined) inv.showGstinOnSite = Boolean(inv.showGstinOnSite);
       Object.entries(inv).forEach(([k, v]) => {
         settings.invoice[k] = v;
       });

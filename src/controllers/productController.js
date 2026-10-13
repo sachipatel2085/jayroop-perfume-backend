@@ -99,6 +99,7 @@ export const getProducts = async (req, res, next) => {
   try {
     const {
       ids,
+      slugs,
       search,
       category,
       subCategory,
@@ -119,6 +120,12 @@ export const getProducts = async (req, res, next) => {
       if (idList.length > 0) {
         filter._id = { $in: idList };
       }
+    }
+
+    // Filter by product URL slugs (e.g. "Shop the products" under a blog article)
+    if (slugs) {
+      const list = String(slugs).split(',').map((s) => s.trim().toLowerCase()).filter((s) => /^[a-z0-9-]{1,120}$/.test(s)).slice(0, 24);
+      filter.slug = { $in: list };
     }
 
     // Search query
@@ -142,12 +149,15 @@ export const getProducts = async (req, res, next) => {
       if (category.match(/^[0-9a-fA-F]{24}$/)) {
         filter.category = category;
       } else {
-        const catDoc = await Category.findOne({ slug: category });
+        const catDoc = await Category.findOne({ slug: String(category).toLowerCase(), status: 'ACTIVE' });
         if (catDoc) {
-          // Include products in this category or any of its subcategories
-          const subCats = await Category.find({ parent: catDoc._id });
+          // Include products in this category or any of its subcategories (either field)
+          const subCats = await Category.find({ parent: catDoc._id, status: 'ACTIVE' });
           const catIds = [catDoc._id, ...subCats.map((s) => s._id)];
-          filter.category = { $in: catIds };
+          filter.$and = [...(filter.$and || []), { $or: [{ category: { $in: catIds } }, { subCategory: { $in: catIds } }] }];
+        } else {
+          // Unknown / inactive category → no products (never fall back to "all products")
+          filter._id = { $in: [] };
         }
       }
     }
@@ -157,8 +167,8 @@ export const getProducts = async (req, res, next) => {
       if (subCategory.match(/^[0-9a-fA-F]{24}$/)) {
         filter.subCategory = subCategory;
       } else {
-        const subDoc = await Category.findOne({ slug: subCategory });
-        if (subDoc) filter.subCategory = subDoc._id;
+        const subDoc = await Category.findOne({ slug: String(subCategory).toLowerCase() });
+        filter.subCategory = subDoc ? subDoc._id : { $in: [] };
       }
     }
 

@@ -109,7 +109,8 @@ export const organizationSchema = (settings) => {
     image: `${siteUrl()}/og-image.jpg`,
     email: b.email,
     telephone: b.phone,
-    vatID: b.gstin || undefined,
+    // GSTIN – published only when Admin › Settings › GST › "Show GSTIN on the website" is on
+    ...(b.gstin && settings.invoice?.showGstinOnSite !== false ? { vatID: b.gstin, taxID: b.gstin } : {}),
     address: {
       '@type': 'PostalAddress',
       streetAddress: [b.addressLine1, b.addressLine2].filter(Boolean).join(', '),

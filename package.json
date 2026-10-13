@@ -22,7 +22,8 @@
     "blogs:wipe": "node src/seed/seedBlogs.js --wipe --yes",
     "blogs:add": "node src/seed/seedBlogs.js --add --yes",
     "blogs:reset": "node src/seed/seedBlogs.js --reset --yes",
-    "blogs:restore": "node src/seed/seedBlogs.js --yes --restore"
+    "blogs:restore": "node src/seed/seedBlogs.js --yes --restore",
+    "doctor": "node src/scripts/doctor.js"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",

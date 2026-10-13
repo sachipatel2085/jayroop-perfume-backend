@@ -13,11 +13,14 @@ const CW = PAGE_W - M * 2; // content width ≈ 523
 export const renderInvoicePdf = async (order, { copyLabel = 'ORIGINAL FOR RECIPIENT', settings = {} } = {}) => {
   const inv = order.invoice || {};
   const seller = inv.seller || {};
-  const isTax = inv.type !== 'INVOICE';
+  // Old invoices have no type → treat as Tax Invoice (that's all the store issued before)
+  const isTax = !inv.type || inv.type === 'TAX_INVOICE';
+  const isBos = inv.type === 'BILL_OF_SUPPLY';
+  const docTitle = isTax ? 'Tax Invoice' : isBos ? 'Bill of Supply' : 'Invoice';
   const isInter = Boolean(inv.isInterState);
   const doc = createDoc({
     info: {
-      Title: `${isTax ? 'Tax Invoice' : 'Invoice'} ${inv.number || order.orderNumber}`,
+      Title: `${docTitle} ${inv.number || order.orderNumber}`,
       Author: seller.legalName || 'Jayrup',
       Subject: `Order ${order.orderNumber}`,
     },
@@ -25,7 +28,7 @@ export const renderInvoicePdf = async (order, { copyLabel = 'ORIGINAL FOR RECIPI
 
   // ───────────── Header band ─────────────
   let y = brandBand(doc, {
-    title: isTax ? 'TAX INVOICE' : 'INVOICE',
+    title: docTitle.toUpperCase(),
     subtitle: copyLabel,
     brandName: seller.brandName || settings?.business?.brandName,
     tagline: seller.tagline ?? settings?.business?.tagline ?? '',
@@ -225,7 +228,7 @@ export const renderInvoicePdf = async (order, { copyLabel = 'ORIGINAL FOR RECIPI
   const totX = M + CW - totW;
   const grossItems = round2((order.items || []).reduce((s, it) => s + Number(it.subtotal || 0), 0));
   const totals = [
-    ['Items Total (incl. GST)', money(grossItems)],
+    [isTax ? (inv.pricesIncludeTax === false ? 'Items Total (excl. GST)' : 'Items Total (incl. GST)') : 'Items Total', money(grossItems)],
     order.discount > 0 ? [`Discount${order.appliedCoupon?.code ? ` (${order.appliedCoupon.code})` : ''}`, `- ${money(order.discount)}`, COLORS.green] : null,
     order.shipping > 0 ? ['Shipping', money(order.shipping)] : ['Shipping', 'FREE', COLORS.green],
     order.codFee > 0 ? ['COD Charges', money(order.codFee)] : null,
@@ -297,7 +300,18 @@ export const renderInvoicePdf = async (order, { copyLabel = 'ORIGINAL FOR RECIPI
       ly += 15;
     });
   } else {
-    doc.font(FONT.regular).fontSize(7.4).fillColor(COLORS.muted).text('Supplier not registered under GST – no GST charged on this invoice.', M + 2, ly, { width: leftW });
+    doc
+      .font(FONT.regular)
+      .fontSize(7.4)
+      .fillColor(COLORS.muted)
+      .text(
+        isBos
+          ? 'Composition taxable person, not eligible to collect tax on supplies.'
+          : 'Supplier not registered under GST – no GST charged on this invoice.',
+        M + 2,
+        ly,
+        { width: leftW }
+      );
     ly += 14;
   }
 

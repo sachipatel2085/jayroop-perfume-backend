@@ -4,9 +4,10 @@ import { round2, financialYear, isValidGSTIN } from '../utils/helpers.js';
 import { findState, stateCodeOf, canonicalStateName } from '../utils/indiaStates.js';
 
 /**
- * GST computation for an order.
- * All storefront prices are GST-inclusive (MRP style), so tax is back-calculated:
- *   taxable = net / (1 + rate/100), tax = net − taxable
+ * GST computation for an order – works for every pricing mode:
+ *   • Inclusive (default, MRP style): tax is back-calculated  taxable = net / (1 + rate/100), tax = net − taxable
+ *   • Exclusive (order.pricesIncludeTax === false): taxable = net, tax = net × rate/100 (added on top)
+ *   • Composition scheme / unregistered: no GST → Bill of Supply / Invoice
  * Intra-state (buyer state == seller state) → CGST + SGST (half each); otherwise IGST.
  * Coupon discount is allocated proportionally across product lines (discount shown on the invoice
  * reduces the transaction value, Sec. 15(3)(a) CGST Act).
@@ -15,6 +16,9 @@ export const computeTaxBreakup = (order, settings) => {
   const business = settings.business || {};
   const inv = settings.invoice || {};
   const gstRegistered = isValidGSTIN(business.gstin);
+  const composition = gstRegistered && (inv.gstScheme || 'REGULAR') === 'COMPOSITION';
+  const chargesGst = gstRegistered && !composition;
+  const exclusive = order.pricesIncludeTax === false;
 
   const sellerState = findState(business.state) || { name: business.state || 'Gujarat', code: business.stateCode || '24' };
   const buyerStateName = canonicalStateName(order.shippingAddress?.state);
@@ -28,9 +32,9 @@ export const computeTaxBreakup = (order, settings) => {
 
   const pushLine = ({ description, hsnCode, quantity, gross, lineDiscount, rate, isService }) => {
     const net = round2(gross - lineDiscount);
-    const effectiveRate = gstRegistered ? Number(rate || 0) : 0;
-    const taxable = round2(net / (1 + effectiveRate / 100));
-    const tax = round2(net - taxable);
+    const effectiveRate = chargesGst ? Number(rate || 0) : 0;
+    const taxable = exclusive ? net : round2(net / (1 + effectiveRate / 100));
+    const tax = exclusive ? round2((net * effectiveRate) / 100) : round2(net - taxable);
     let cgst = 0;
     let sgst = 0;
     let igst = 0;
@@ -51,7 +55,7 @@ export const computeTaxBreakup = (order, settings) => {
       cgst,
       sgst,
       igst,
-      total: net,
+      total: round2(taxable + tax),
       isService: Boolean(isService),
     });
   };
@@ -117,7 +121,8 @@ export const computeTaxBreakup = (order, settings) => {
   const roundOff = round2(grandTotal - linesTotal);
 
   return {
-    type: gstRegistered ? 'TAX_INVOICE' : 'INVOICE',
+    type: chargesGst ? 'TAX_INVOICE' : composition ? 'BILL_OF_SUPPLY' : 'INVOICE',
+    pricesIncludeTax: !exclusive,
     placeOfSupply: buyerStateName,
     placeOfSupplyCode: buyerCode,
     isInterState,
