@@ -35,3 +35,5 @@ smoke-output/
 
 # Catalogue backups made by `npm run seed:catalog` (contain your product data)
 backups/
+
+.env
