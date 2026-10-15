@@ -42,6 +42,7 @@ const auditLogSchema = new mongoose.Schema(
         'PRODUCT_UPDATED',
         'REPORT_EXPORTED',
         'RETURN_REQUEST_UPDATED',
+        'REVIEW_DELETED',
         'REVIEW_MODERATED',
         'STORE_SETTINGS_UPDATED',
         'TRACKING_ID_UPDATED',

@@ -25,7 +25,9 @@
     "blogs:restore": "node src/seed/seedBlogs.js --yes --restore",
     "doctor": "node src/scripts/doctor.js",
     "invoices:gstin-preview": "node src/scripts/fixInvoiceGstin.js",
-    "invoices:gstin-fix": "node src/scripts/fixInvoiceGstin.js --yes"
+    "invoices:gstin-fix": "node src/scripts/fixInvoiceGstin.js --yes",
+    "invoices:seller-preview": "node src/scripts/fixInvoiceGstin.js --seller",
+    "invoices:seller-fix": "node src/scripts/fixInvoiceGstin.js --seller --yes"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",

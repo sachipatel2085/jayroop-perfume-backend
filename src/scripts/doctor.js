@@ -123,6 +123,9 @@ const run = async () => {
   section('Store settings');
   const s = await Setting.getStoreSettings();
   const gstin = s.business?.gstin;
+  const legalName = s.business?.legalName || '';
+  if (!legalName || /fitjayesh/i.test(legalName)) warn(`Legal name is "${legalName || 'empty'}" – should match your GST certificate & PhonePe account`, 'Admin › Settings › Business › Legal name');
+  else ok(`Legal name: ${legalName}`);
   if (!gstin) warn('GSTIN is empty – invoices are issued without GST', 'Admin › Settings › GST & Tax');
   else if (!isValidGSTIN(gstin)) bad(`GSTIN "${gstin}" is not a valid format`, 'Admin › Settings › GST & Tax');
   else ok(`GSTIN ${gstin} · ${s.invoice?.gstScheme || 'REGULAR'} scheme · prices ${s.invoice?.pricesIncludeTax === false ? 'EXCLUDE' : 'include'} GST`);

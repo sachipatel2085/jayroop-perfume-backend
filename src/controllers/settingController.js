@@ -3,6 +3,45 @@ import { logAdminAction } from '../utils/auditLogger.js';
 import { publicGatewayInfo } from '../services/phonepe.js';
 import { isValidGSTIN } from '../utils/helpers.js';
 import { stateCodeOf, INDIA_STATES } from '../utils/indiaStates.js';
+import { Coupon } from '../models/Coupon.js';
+import { socialLinks, normaliseSocial, SOCIAL_KEYS } from '../utils/social.js';
+
+const inr = (n) => `₹${Number(n || 0).toLocaleString('en-IN')}`;
+
+/** Is this coupon usable right now? (exists, ACTIVE, started, not expired, uses left) */
+export const liveCoupon = async (code) => {
+  if (!code) return null;
+  const c = await Coupon.findOne({ code: String(code).toUpperCase().trim() }).lean();
+  const now = new Date();
+  if (!c || c.status !== 'ACTIVE') return null;
+  if (c.startDate && new Date(c.startDate) > now) return null;
+  if (c.expiryDate && new Date(c.expiryDate) < now) return null;
+  if (c.usageLimit && (c.timesUsed || 0) >= c.usageLimit) return null;
+  return c;
+};
+
+/** The strip at the top of the storefront – built on the server so it is always truthful. */
+export const buildAnnouncement = async (s) => {
+  const a = s.announcement || {};
+  if (a.enabled === false) return { enabled: false, items: [] };
+  const items = [];
+  const sh = s.shipping || {};
+  if (a.showFreeShipping !== false && sh.freeShippingEnabled !== false && Number(s.freeShippingThreshold) > 0) {
+    items.push({ type: 'SHIPPING', text: String(a.freeShippingText || 'Free delivery on orders above {amount}').replace('{amount}', inr(s.freeShippingThreshold)) });
+  }
+  const coupon = await liveCoupon(a.couponCode);
+  if (coupon) {
+    const discount = coupon.discountType === 'PERCENTAGE' ? `${coupon.discountValue}%` : inr(coupon.discountValue);
+    items.push({
+      type: 'COUPON',
+      code: coupon.code,
+      text: String(a.couponText || 'Use code {code} for {discount} off').replace('{discount}', discount),
+      minimumOrder: coupon.minimumOrder || 0,
+    });
+  }
+  for (const m of a.messages || []) if (m?.text) items.push({ type: 'MESSAGE', text: m.text, link: m.link || '' });
+  return { enabled: items.length > 0, items: items.slice(0, 6) };
+};
 
 const pick = (obj = {}, keys = []) => Object.fromEntries(keys.filter((k) => obj[k] !== undefined).map((k) => [k, obj[k]]));
 
@@ -69,6 +108,13 @@ export const getPublicSettings = async (req, res, next) => {
           instagram: b.instagram,
           facebook: b.facebook,
           youtube: b.youtube,
+          social: socialLinks(b),
+        },
+        announcement: await buildAnnouncement(s),
+        reviews: {
+          enabled: s.reviews?.enabled !== false,
+          buyersOnly: Boolean(s.reviews?.buyersOnly),
+          minLength: s.reviews?.minLength ?? 20,
         },
         defaultMetaTitle: s.defaultMetaTitle,
         defaultMetaDescription: s.defaultMetaDescription || '',
@@ -161,8 +207,12 @@ export const updateSettings = async (req, res, next) => {
     if (body.business && typeof body.business === 'object') {
       const b = pick(body.business, [
         'brandName', 'tradeName', 'tagline', 'legalName', 'registrationNote', 'gstin', 'pan', 'udyamNumber', 'addressLine1', 'addressLine2',
-        'city', 'district', 'state', 'postalCode', 'country', 'phone', 'whatsapp', 'email', 'website', 'instagram', 'facebook', 'youtube',
+        'city', 'district', 'state', 'postalCode', 'country', 'phone', 'whatsapp', 'email', 'website', ...SOCIAL_KEYS,
       ]);
+      // Accept "@jayrup.in", "jayrup.in" or a full URL – always stored as a full https link
+      SOCIAL_KEYS.forEach((k) => {
+        if (b[k] !== undefined) b[k] = normaliseSocial(k, b[k]);
+      });
       if (b.gstin && !isValidGSTIN(b.gstin)) {
         return res.status(400).json({ success: false, message: 'Invalid GSTIN format (e.g. 24ABCDE1234F1Z5).' });
       }
@@ -197,6 +247,35 @@ export const updateSettings = async (req, res, next) => {
         settings.invoice[k] = v;
       });
       settings.markModified('invoice');
+    }
+
+    if (body.announcement && typeof body.announcement === 'object') {
+      const a = body.announcement;
+      const cur = settings.announcement || {};
+      if (a.enabled !== undefined) cur.enabled = Boolean(a.enabled);
+      if (a.showFreeShipping !== undefined) cur.showFreeShipping = Boolean(a.showFreeShipping);
+      if (a.freeShippingText !== undefined) cur.freeShippingText = String(a.freeShippingText || '').trim().slice(0, 120);
+      if (a.couponCode !== undefined) cur.couponCode = String(a.couponCode || '').toUpperCase().replace(/[^A-Z0-9_-]/g, '').slice(0, 30);
+      if (a.couponText !== undefined) cur.couponText = String(a.couponText || '').trim().slice(0, 120);
+      if (Array.isArray(a.messages)) {
+        cur.messages = a.messages
+          .map((m) => ({ text: String(m?.text || '').trim().slice(0, 140), link: String(m?.link || '').trim().slice(0, 300) }))
+          .filter((m) => m.text)
+          .slice(0, 4);
+      }
+      settings.announcement = cur;
+      settings.markModified('announcement');
+    }
+
+    if (body.reviews && typeof body.reviews === 'object') {
+      const r = body.reviews;
+      const cur = settings.reviews || {};
+      ['enabled', 'autoApproveVerified', 'buyersOnly'].forEach((k) => {
+        if (r[k] !== undefined) cur[k] = Boolean(r[k]);
+      });
+      if (r.minLength !== undefined) cur.minLength = Math.min(500, Math.max(0, Math.round(Number(r.minLength) || 0)));
+      settings.reviews = cur;
+      settings.markModified('reviews');
     }
 
     await settings.save();

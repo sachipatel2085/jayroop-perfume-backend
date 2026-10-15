@@ -25,6 +25,23 @@ const run = async () => {
   const gstin = store.business?.gstin || '';
   if (!isValidGSTIN(gstin)) throw new Error('No valid GSTIN in Admin › Settings › GST & Tax yet – add it and save first.');
 
+  // --seller: invoices that already carry THIS GSTIN but an old business name/address (e.g. FITJAYESH) get the
+  // current seller block. Amounts and GST split are not touched.
+  if (process.argv.includes('--seller')) {
+    const rows = await Order.find({ 'invoice.seller.gstin': gstin, 'invoice.seller.legalName': { $ne: store.business.legalName } });
+    console.log(`\nInvoices with GSTIN ${gstin} but an old legal name: ${rows.length}`);
+    for (const o of rows) {
+      console.log(`  ${o.invoice.number}  ${o.invoice.seller?.legalName || '—'} → ${store.business.legalName}`);
+      if (!APPLY) continue;
+      o.invoice = { ...o.invoice.toObject(), seller: sellerSnapshot(store) };
+      o.markModified('invoice');
+      await o.save({ validateBeforeSave: false });
+    }
+    console.log(APPLY ? `✓ Updated ${rows.length} invoice(s).\n` : 'PREVIEW ONLY – to apply: npm run invoices:seller-fix\n');
+    await mongoose.disconnect();
+    return;
+  }
+
   const orders = await Order.find({
     'invoice.number': { $exists: true },
     'invoice.creditNote.number': { $exists: false },

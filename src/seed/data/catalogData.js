@@ -8,7 +8,7 @@
  * Images live in the storefront: jayroop-perfume-frontend/public/images/products/
  */
 
-const MARKETED_BY = 'Jayrup, G-28 Metropolis Complex, Bhiloda Road, Gambhoi, Himatnagar, Sabarkantha, Gujarat – 383030, India';
+const MARKETED_BY = 'JAYRUP TRADING COMPANY (brand: Jayrup), G-28 Metropolis Complex, Bhiloda Road, Gambhoi, Himatnagar, Sabarkantha, Gujarat – 383030, India';
 const CUSTOMER_CARE = '+91 63594 95647 · care@jayrup.in · jayrup.in';
 
 // ───────────────────────────── CATEGORIES ─────────────────────────────
@@ -306,7 +306,7 @@ ${occasion.map((o) => `<li>${o}</li>`).join('\n')}
 <tr><th>Net volume</th><td>150 ml</td></tr>
 <tr><th>Ideal for</th><td>${forWhom}</td></tr>
 <tr><th>Character</th><td>${mood}</td></tr>
-<tr><th>Marketed by</th><td>Jayrup, Himatnagar, Gujarat</td></tr>
+<tr><th>Marketed by</th><td>JAYRUP TRADING COMPANY (Jayrup), Himatnagar, Gujarat</td></tr>
 <tr><th>Country of origin</th><td>India</td></tr>
 </tbody>
 </table>
@@ -588,7 +588,7 @@ export const PRODUCTS = [
 <tr><th>Net volume</th><td>50 ml | 1.69 fl. oz</td></tr>
 <tr><th>Ideal for</th><td>Men</td></tr>
 <tr><th>Manufactured &amp; packed by</th><td>Hulo Fashion Private Limited, Jaipur</td></tr>
-<tr><th>Marketed by</th><td>Jayrup, Himatnagar, Gujarat</td></tr>
+<tr><th>Marketed by</th><td>JAYRUP TRADING COMPANY (Jayrup), Himatnagar, Gujarat</td></tr>
 <tr><th>Country of origin</th><td>India</td></tr>
 <tr><th>Shelf life</th><td>Best before 36 months from manufacture</td></tr>
 </tbody>
@@ -647,7 +647,7 @@ export const PRODUCTS = [
       },
       {
         question: 'Is Royal Flora original and where is it made?',
-        answer: 'Yes. Royal Flora is sold directly by Jayrup. It is manufactured and packed by Hulo Fashion Private Limited, Jaipur, and marketed by Jayrup, Himatnagar (Gujarat). Batch number, date of manufacture and MRP are printed on every pack.',
+        answer: 'Yes. Royal Flora is sold directly by Jayrup. It is manufactured and packed by Hulo Fashion Private Limited, Jaipur, and marketed by JAYRUP TRADING COMPANY (brand: Jayrup), Himatnagar (Gujarat). Batch number, date of manufacture and MRP are printed on every pack.',
       },
       {
         question: 'Why does perfume delivery take a little longer?',
@@ -783,7 +783,7 @@ export const PRODUCTS = [
 <tr><th>Type</th><td>Ayurvedic Proprietary Medicine – external use only</td></tr>
 <tr><th>Net weight</th><td>20 g</td></tr>
 <tr><th>Manufactured by</th><td>Radha Pharmacy, Sheoganj (Rajasthan) · Mfg. Lic. No. 518 D</td></tr>
-<tr><th>Marketed by</th><td>Jayrup, Himatnagar, Gujarat</td></tr>
+<tr><th>Marketed by</th><td>JAYRUP TRADING COMPANY (Jayrup), Himatnagar, Gujarat</td></tr>
 <tr><th>Shelf life</th><td>36 months from manufacture (expiry printed on pack)</td></tr>
 <tr><th>Country of origin</th><td>India</td></tr>
 </tbody>

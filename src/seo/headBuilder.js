@@ -1,7 +1,8 @@
+import { socialLinks } from '../utils/social.js';
 import { Product } from '../models/Product.js';
 import { Category } from '../models/Category.js';
 import { Blog } from '../models/Blog.js';
-import { Review } from '../models/Review.js';
+import { Review, APPROVED_FILTER } from '../models/Review.js';
 import { Setting } from '../models/Setting.js';
 import { Redirect } from '../models/Redirect.js';
 import { HOME_FAQS } from './homeContent.js';
@@ -96,7 +97,7 @@ const effectivePrice = (p) => (p.salePrice && p.salePrice < p.price ? p.salePric
 // ───────────────────────── Schema.org builders ─────────────────────────
 export const organizationSchema = (settings) => {
   const b = settings.business || {};
-  const sameAs = [b.instagram, b.facebook, b.youtube].filter(Boolean);
+  const sameAs = socialLinks(b).map((x) => x.url);
   return {
     '@context': 'https://schema.org',
     '@type': 'OnlineStore',
@@ -104,6 +105,8 @@ export const organizationSchema = (settings) => {
     name: b.brandName || 'Jayrup',
     alternateName: [...new Set([b.tradeName, 'जयरूप'].filter((n) => n && n !== (b.brandName || 'Jayrup')))],
     legalName: b.legalName || undefined,
+    description: `${b.brandName || 'Jayrup'} is a brand of ${b.legalName || 'Jayrup'} – luxury perfumes, deodorant body sprays and Ayurvedic skin care, made in India.`,
+    ...(b.tagline ? { slogan: b.tagline } : {}),
     url: siteUrl(),
     logo: { '@type': 'ImageObject', url: `${siteUrl()}/logo-512.png`, width: 512, height: 512 },
     image: `${siteUrl()}/og-image.jpg`,
@@ -278,7 +281,7 @@ export const productSchema = (product, settings, reviews = []) => {
       schema.review = reviews.slice(0, 5).map((r) => ({
         '@type': 'Review',
         reviewRating: { '@type': 'Rating', ratingValue: r.rating, bestRating: 5 },
-        author: { '@type': 'Person', name: r.user?.name ? r.user.name.split(' ')[0] : 'Verified Buyer' },
+        author: { '@type': 'Person', name: r.reviewerName || (r.user?.name ? r.user.name.split(' ')[0] : 'Verified Buyer') },
         datePublished: new Date(r.createdAt).toISOString().slice(0, 10),
         ...(r.title ? { name: r.title } : {}),
         reviewBody: truncate(r.comment, 500),
@@ -444,7 +447,7 @@ export const buildSeoForPath = async (rawPath = '/') => {
     const product = await Product.findOne({ slug: m[1], status: 'ACTIVE' }).populate('category', 'name slug productType hsnCode').lean();
     if (!product) return { ...base, status: 404, title: 'Product not found | Jayrup', robots: 'noindex, follow' };
     const reviews = product.numReviews
-      ? await Review.find({ product: product._id, isApproved: true }).populate('user', 'name').sort({ createdAt: -1 }).limit(5).lean()
+      ? await Review.find({ product: product._id, ...APPROVED_FILTER }).populate('user', 'name').sort({ featured: -1, createdAt: -1 }).limit(5).lean()
       : [];
     const price = product.variants?.length
       ? Math.min(...product.variants.map((v) => (v.salePrice && v.salePrice < v.price ? v.salePrice : v.price)))

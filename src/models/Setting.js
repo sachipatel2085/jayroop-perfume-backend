@@ -77,8 +77,9 @@ const settingSchema = new mongoose.Schema(
       brandName: { type: String, default: 'Jayrup', trim: true },
       tradeName: { type: String, default: 'Jayrup', trim: true }, // must match the trade name on the GST certificate
       tagline: { type: String, default: 'Skincare · Fragrances · Personal Care', trim: true, maxlength: 80 }, // printed on invoices & reports
-      legalName: { type: String, default: 'FITJAYESH', trim: true },
-      registrationNote: { type: String, default: 'MSME Registered', trim: true },
+      // The legal entity that owns the Jayrup brand – exactly as on the GST certificate / bank / PhonePe account
+      legalName: { type: String, default: 'JAYRUP TRADING COMPANY', trim: true },
+      registrationNote: { type: String, default: '', trim: true }, // optional, e.g. "MSME Registered" (only if this entity is)
       gstin: { type: String, default: '', trim: true, uppercase: true },
       pan: { type: String, default: '', trim: true, uppercase: true },
       udyamNumber: { type: String, default: '', trim: true, uppercase: true },
@@ -97,6 +98,33 @@ const settingSchema = new mongoose.Schema(
       instagram: { type: String, default: '', trim: true },
       facebook: { type: String, default: '', trim: true },
       youtube: { type: String, default: '', trim: true },
+      x: { type: String, default: '', trim: true },
+      linkedin: { type: String, default: '', trim: true },
+      pinterest: { type: String, default: '', trim: true },
+      threads: { type: String, default: '', trim: true },
+    },
+
+    // ───────────── Announcement strip (top of every storefront page) ─────────────
+    announcement: {
+      enabled: { type: Boolean, default: true },
+      // "{amount}" is replaced with the live free-shipping limit; hidden automatically if free shipping is off
+      showFreeShipping: { type: Boolean, default: true },
+      freeShippingText: { type: String, default: 'Complimentary Royal Delivery on Orders Above {amount}', trim: true, maxlength: 120 },
+      // Shown ONLY while this coupon exists, is ACTIVE, has started, has not expired and has uses left.
+      couponCode: { type: String, default: 'ROYAL10', trim: true, uppercase: true, maxlength: 30 },
+      couponText: { type: String, default: 'Use Code {code} for {discount} Off', trim: true, maxlength: 120 },
+      messages: {
+        type: [{ _id: false, text: { type: String, trim: true, maxlength: 140 }, link: { type: String, trim: true, maxlength: 300 } }],
+        default: () => [],
+      },
+    },
+
+    // ───────────── Product reviews ─────────────
+    reviews: {
+      enabled: { type: Boolean, default: true },
+      autoApproveVerified: { type: Boolean, default: true }, // verified buyers go live instantly
+      buyersOnly: { type: Boolean, default: false }, // only customers who bought the product may review
+      minLength: { type: Number, default: 20, min: 0, max: 500 },
     },
 
     // ───────────── Tax & invoice preferences ─────────────
@@ -167,6 +195,8 @@ const settingSchema = new mongoose.Schema(
 // Values written by earlier versions that were specific to a single product. If the admin never
 // changed them, they are upgraded to the product-neutral defaults automatically (once).
 const LEGACY_DEFAULTS = [
+  ['business.legalName', ['FITJAYESH']],
+  ['business.registrationNote', ['MSME Registered']],
   ['business.tradeName', ['Jayrup Pimples Cream']],
   ['defaultMetaTitle', ['Jayrup | Pimples Cream, Ayurvedic Skincare & Luxury Perfumes Online India', 'Jayrup | Skincare & Luxury Perfumes – Shop Online in India', 'Jayrup | Luxury Perfume for Men & Ayurvedic Pimple Cream India']],
   [
