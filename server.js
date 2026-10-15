@@ -107,7 +107,7 @@ app.use(
       return callback(null, true);
     },
     credentials: true,
-    exposedHeaders: ["Content-Disposition"],
+    exposedHeaders: ["Content-Disposition", "X-Print-Summary"],
   }),
 );
 

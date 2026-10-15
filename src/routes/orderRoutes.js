@@ -14,6 +14,8 @@ import {
   downloadInvoice,
   generateInvoice,
   downloadShippingLabel,
+  bulkPrint,
+  getPrintOptions,
   taxPreview,
 } from '../controllers/orderController.js';
 import { protect, authorize, optionalAuth } from '../middleware/authMiddleware.js';
@@ -30,6 +32,8 @@ router.post('/my-orders/:orderNumber/return-request', protect, requestReturn);
 
 // Admin
 router.get('/', ...admin, getAllOrders);
+router.get('/print/options', ...admin, getPrintOptions);
+router.post('/print', ...admin, bulkPrint);
 router.get('/admin/:id', ...admin, getAdminOrder);
 router.put('/:id/status', ...admin, updateOrderStatus);
 router.put('/:id/tracking', ...admin, updateOrderTracking);

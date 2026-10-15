@@ -6,6 +6,7 @@ import { cancelOrder } from '../services/orderLifecycle.js';
 import { issueInvoice, previewInvoice } from '../services/invoiceService.js';
 import { renderInvoicePdf } from '../services/pdf/invoicePdf.js';
 import { renderShippingLabelPdf } from '../services/pdf/labelPdf.js';
+import { composeSheets, mergePdfs, PAPER_SIZES, PER_PAGE_OPTIONS } from '../services/pdf/printSheet.js';
 import { httpError } from '../services/pricingService.js';
 import { sendMail, sendShippedMail, sendDeliveredMail } from '../services/mailer.js';
 import { ContactInquiry } from '../models/ContactInquiry.js';
@@ -347,6 +348,107 @@ export const downloadShippingLabel = async (req, res, next) => {
     const settings = await Setting.getStoreSettings();
     const pdf = await renderShippingLabelPdf(order, { settings });
     sendPdf(res, pdf, `Label-${order.orderNumber}.pdf`, req.query.inline !== '0');
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Admin: print options for the bulk print dialog
+// @route   GET /api/v1/orders/print/options
+// @access  Private/Admin
+export const getPrintOptions = (req, res) => {
+  res.status(200).json({
+    success: true,
+    data: {
+      papers: Object.entries(PAPER_SIZES).map(([key, p]) => ({ key, label: p.label, widthPt: p.size[0], heightPt: p.size[1] })),
+      perPage: PER_PAGE_OPTIONS,
+      maxOrders: BULK_PRINT_MAX,
+    },
+  });
+};
+
+const BULK_PRINT_MAX = 200;
+const COPY_LABELS = { ORIGINAL: 'ORIGINAL FOR RECIPIENT', DUPLICATE: 'DUPLICATE FOR TRANSPORTER', TRIPLICATE: 'TRIPLICATE FOR SUPPLIER' };
+
+// @desc    Admin: many invoices / shipping labels in ONE printable PDF, several per sheet
+// @route   POST /api/v1/orders/print
+// @body    { orderIds[], documents: INVOICE|LABEL|BOTH, copies: [ORIGINAL,DUPLICATE,TRIPLICATE],
+//            paper, orientation: auto|portrait|landscape, perPage, labelPaper, labelsPerPage,
+//            margin (mm), gap (mm), cutLines, issueMissing, sort: selected|date|invoice }
+// @access  Private/Admin
+export const bulkPrint = async (req, res, next) => {
+  try {
+    const b = req.body || {};
+    const ids = [...new Set((Array.isArray(b.orderIds) ? b.orderIds : []).map(String))].filter((id) => /^[0-9a-fA-F]{24}$/.test(id));
+    if (!ids.length) throw httpError(400, 'Select at least one order to print.');
+    if (ids.length > BULK_PRINT_MAX) throw httpError(400, `You can print up to ${BULK_PRINT_MAX} orders at a time.`);
+
+    const documents = ['INVOICE', 'LABEL', 'BOTH'].includes(b.documents) ? b.documents : 'INVOICE';
+    const wantInvoices = documents !== 'LABEL';
+    const wantLabels = documents !== 'INVOICE';
+    const copies = (Array.isArray(b.copies) ? b.copies : ['ORIGINAL']).filter((c) => COPY_LABELS[c]);
+    if (!copies.length) copies.push('ORIGINAL');
+    const paper = PAPER_SIZES[b.paper] ? b.paper : 'A4';
+    const labelPaper = PAPER_SIZES[b.labelPaper] ? b.labelPaper : paper;
+    const orientation = ['auto', 'portrait', 'landscape'].includes(b.orientation) ? b.orientation : 'auto';
+    const perPage = PER_PAGE_OPTIONS.includes(Number(b.perPage)) ? Number(b.perPage) : 1;
+    const labelsPerPage = PER_PAGE_OPTIONS.includes(Number(b.labelsPerPage)) ? Number(b.labelsPerPage) : perPage;
+    const margin = Math.min(25, Math.max(0, Number(b.margin ?? 6)));
+    const gap = Math.min(20, Math.max(0, Number(b.gap ?? 4)));
+    const cutLines = b.cutLines !== false;
+
+    const found = await Order.find({ _id: { $in: ids } });
+    const byId = new Map(found.map((o) => [String(o._id), o]));
+    let orders = ids.map((id) => byId.get(id)).filter(Boolean);
+    if (b.sort === 'date') orders.sort((x, y) => new Date(x.createdAt) - new Date(y.createdAt));
+    if (b.sort === 'invoice') orders.sort((x, y) => (x.invoice?.sequence || 1e12) - (y.invoice?.sequence || 1e12));
+
+    const settings = await Setting.getStoreSettings();
+    const skipped = [];
+    const issued = [];
+    const invoicePdfs = [];
+    const labelPdfs = [];
+
+    for (const order of orders) {
+      if (wantInvoices) {
+        if (!order.invoice?.number) {
+          if (!b.issueMissing) {
+            skipped.push(`${order.orderNumber}: no invoice yet`);
+          } else if (['PENDING_PAYMENT', 'CANCELLED'].includes(order.orderStatus)) {
+            skipped.push(`${order.orderNumber}: ${order.orderStatus === 'CANCELLED' ? 'cancelled' : 'not paid'}`);
+          } else {
+            await issueInvoice(order, { settings });
+            await order.save();
+            issued.push(order.invoice.number);
+          }
+        }
+        if (order.invoice?.number) {
+          for (const c of copies) invoicePdfs.push(await renderInvoicePdf(order, { copyLabel: COPY_LABELS[c], settings }));
+        }
+      }
+      if (wantLabels) labelPdfs.push(await renderShippingLabelPdf(order, { settings }));
+    }
+
+    if (!invoicePdfs.length && !labelPdfs.length) {
+      throw httpError(400, skipped.length ? `Nothing to print – ${skipped.join('; ')}. Tick “Issue missing invoices” to create them.` : 'Nothing to print.');
+    }
+
+    const parts = [];
+    if (invoicePdfs.length) parts.push(await composeSheets(invoicePdfs, { paper, orientation, perPage, margin, gap, cutLines, title: 'Jayrup invoices' }));
+    if (labelPdfs.length) parts.push(await composeSheets(labelPdfs, { paper: labelPaper, orientation, perPage: labelsPerPage, margin, gap, cutLines, title: 'Jayrup shipping labels' }));
+    const pdf = parts.length === 1 ? parts[0] : await mergePdfs(parts, 'Jayrup invoices & labels');
+
+    await logAdminAction({
+      req,
+      action: 'ORDERS_BULK_PRINTED',
+      resource: 'Order',
+      resourceId: 'bulk',
+      details: { orders: orders.length, documents, copies, paper, perPage, issued, skipped: skipped.length },
+    });
+
+    const stamp = new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '');
+    res.set('X-Print-Summary', encodeURIComponent(JSON.stringify({ orders: orders.length, invoices: invoicePdfs.length, labels: labelPdfs.length, issued: issued.length, skipped })));
+    sendPdf(res, pdf, `Jayrup-${documents === 'LABEL' ? 'labels' : 'invoices'}-${stamp}.pdf`, true);
   } catch (error) {
     next(error);
   }
