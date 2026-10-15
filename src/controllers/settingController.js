@@ -18,7 +18,7 @@ export const getPublicSettings = async (req, res, next) => {
     const sh = s.shipping || {};
     const gstRegistered = isValidGSTIN(b.gstin);
     const showGstin = inv.showGstinOnSite !== false && gstRegistered;
-    res.set('Cache-Control', 'public, max-age=120');
+    res.set('Cache-Control', 'public, max-age=30');
     res.status(200).json({
       success: true,
       data: {

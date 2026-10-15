@@ -37,10 +37,20 @@ const userSchema = new mongoose.Schema(
     },
     password: {
       type: String,
-      required: [true, 'Please enter your password'],
+      // Accounts created with "Continue with Google" have no password until the customer sets one
+      required: [
+        function () {
+          return !this.googleId;
+        },
+        'Please enter your password',
+      ],
       minlength: [6, 'Password must be at least 6 characters'],
       select: false,
     },
+    // Google sign-in (Firebase Authentication uid). Sparse: most password accounts don't have one.
+    googleId: { type: String, default: undefined, index: { unique: true, sparse: true } },
+    avatar: { type: String, default: '', trim: true },
+    authProviders: { type: [String], enum: ['password', 'google'], default: ['password'] },
     role: {
       type: String,
       enum: ['CUSTOMER', 'ADMIN', 'SUPER_ADMIN'],
@@ -76,9 +86,10 @@ const userSchema = new mongoose.Schema(
 
 // Encrypt password using bcrypt before saving
 userSchema.pre('save', async function () {
-  if (!this.isModified('password')) {
+  if (!this.isModified('password') || !this.password) {
     return;
   }
+  if (!this.authProviders?.includes('password')) this.authProviders = [...(this.authProviders || []), 'password'];
   const salt = await bcrypt.genSalt(10);
   this.password = await bcrypt.hash(this.password, salt);
   if (!this.isNew) this.passwordChangedAt = new Date(Date.now() - 1000);
@@ -92,9 +103,10 @@ userSchema.methods.createPasswordResetToken = function () {
   return rawToken;
 };
 
-// Compare entered password with hashed password in database
+// Compare entered password with hashed password in database (Google-only accounts have none)
 userSchema.methods.matchPassword = async function (enteredPassword) {
-  return await bcrypt.compare(enteredPassword, this.password);
+  if (!this.password || !enteredPassword) return false;
+  return await bcrypt.compare(String(enteredPassword), this.password);
 };
 
 export const User = mongoose.model('User', userSchema);

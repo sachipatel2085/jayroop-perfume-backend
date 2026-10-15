@@ -4,6 +4,7 @@ import validator from 'validator';
 import { User } from '../models/User.js';
 import { jwtSecret } from '../middleware/authMiddleware.js';
 import { sendPasswordResetMail } from '../services/mailer.js';
+import { verifyFirebaseIdToken, isFirebaseConfigured } from '../services/firebaseAuth.js';
 import { isValidIndianPhone, isValidPincode } from '../utils/helpers.js';
 import { canonicalStateName, findState } from '../utils/indiaStates.js';
 
@@ -50,7 +51,9 @@ export const register = async (req, res, next) => {
     if (existingUser) {
       return res.status(400).json({
         success: false,
-        message: 'An account with this email address already exists',
+        message: existingUser.googleId
+          ? 'An account with this e-mail already exists – please use “Continue with Google” to sign in.'
+          : 'An account with this email address already exists',
       });
     }
 
@@ -117,6 +120,13 @@ export const login = async (req, res, next) => {
       });
     }
 
+    if (!user.password) {
+      return res.status(401).json({
+        success: false,
+        message: 'This account signs in with Google. Please use “Continue with Google”, or set a password with “Forgot password”.',
+      });
+    }
+
     const isMatch = await user.matchPassword(password);
     if (!isMatch) {
       return res.status(401).json({
@@ -139,6 +149,79 @@ export const login = async (req, res, next) => {
         role: user.role,
         phone: user.phone,
         token,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Sign in / sign up with Google (Firebase Authentication)
+// @route   POST /api/v1/auth/google   { idToken, marketingOptIn? }
+// @access  Public
+// The browser signs in with Firebase and sends the Firebase ID token; we verify it with Google's public
+// keys, then find the customer by Google uid or e-mail (linking an existing password account), or create one.
+export const googleLogin = async (req, res, next) => {
+  try {
+    if (!isFirebaseConfigured()) {
+      return res.status(503).json({ success: false, message: 'Google sign-in is not available right now. Please use e-mail and password.' });
+    }
+    let g;
+    try {
+      g = await verifyFirebaseIdToken(req.body?.idToken);
+    } catch (err) {
+      if (err.statusCode) throw err;
+      return res.status(502).json({ success: false, message: 'Could not reach Google to verify your sign-in. Please try again.' });
+    }
+    if (g.provider && g.provider !== 'google.com') {
+      return res.status(400).json({ success: false, message: 'Please sign in with a Google account.' });
+    }
+    if (!g.email || !g.emailVerified) {
+      return res.status(400).json({ success: false, message: 'Your Google account e-mail is not verified. Please verify it with Google or sign up with e-mail.' });
+    }
+
+    let user = await User.findOne({ googleId: g.uid });
+    let isNew = false;
+    if (!user) user = await User.findOne({ email: g.email });
+
+    if (user) {
+      if (!user.isActive) {
+        return res.status(403).json({ success: false, message: 'This account has been deactivated. Please contact customer care.' });
+      }
+      // Link Google to an existing e-mail account (Google has verified the mailbox owner)
+      if (!user.googleId) user.googleId = g.uid;
+      if (!user.authProviders?.includes('google')) user.authProviders = [...(user.authProviders || []), 'google'];
+      if (!user.avatar && g.picture) user.avatar = g.picture.slice(0, 500);
+    } else {
+      isNew = true;
+      const phone = g.phone.replace(/^\+91/, '').replace(/\D/g, '');
+      user = new User({
+        name: (g.name || g.email.split('@')[0]).slice(0, 60),
+        email: g.email,
+        googleId: g.uid,
+        authProviders: ['google'],
+        avatar: g.picture.slice(0, 500),
+        phone: isValidIndianPhone(phone) ? phone : '',
+        role: 'CUSTOMER',
+        marketingOptIn: Boolean(req.body?.marketingOptIn),
+      });
+    }
+    user.lastLoginAt = new Date();
+    await user.save({ validateBeforeSave: !isNew ? false : true });
+
+    res.status(isNew ? 201 : 200).json({
+      success: true,
+      message: isNew ? 'Account created with Google' : 'Signed in with Google',
+      data: {
+        _id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        phone: user.phone,
+        avatar: user.avatar,
+        isNew,
+        needsPhone: !user.phone,
+        token: generateToken(user._id),
       },
     });
   } catch (error) {
@@ -363,14 +446,15 @@ export const setDefaultAddress = async (req, res, next) => {
 export const changePassword = async (req, res, next) => {
   try {
     const { currentPassword, newPassword } = req.body;
-    if (!currentPassword || !newPassword) {
+    if (!newPassword) {
       return res.status(400).json({ success: false, message: 'Please provide your current and new password' });
     }
     if (String(newPassword).length < 8) {
       return res.status(400).json({ success: false, message: 'New password must be at least 8 characters long' });
     }
     const user = await User.findById(req.user._id).select('+password');
-    if (!(await user.matchPassword(currentPassword))) {
+    // Google-only accounts have no password yet – they can set one without a current password
+    if (user.password && !(await user.matchPassword(currentPassword))) {
       return res.status(401).json({ success: false, message: 'Current password is incorrect' });
     }
     user.password = newPassword;

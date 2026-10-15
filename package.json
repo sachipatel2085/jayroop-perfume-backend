@@ -1,7 +1,7 @@
 {
   "name": "jayrup-backend",
   "version": "2.0.0",
-  "description": "Jayrup e-commerce API \u2013 PhonePe payments, GST invoicing, reports & SEO",
+  "description": "Jayrup e-commerce API – PhonePe payments, GST invoicing, reports & SEO",
   "type": "module",
   "main": "server.js",
   "scripts": {
@@ -23,7 +23,9 @@
     "blogs:add": "node src/seed/seedBlogs.js --add --yes",
     "blogs:reset": "node src/seed/seedBlogs.js --reset --yes",
     "blogs:restore": "node src/seed/seedBlogs.js --yes --restore",
-    "doctor": "node src/scripts/doctor.js"
+    "doctor": "node src/scripts/doctor.js",
+    "invoices:gstin-preview": "node src/scripts/fixInvoiceGstin.js",
+    "invoices:gstin-fix": "node src/scripts/fixInvoiceGstin.js --yes"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",

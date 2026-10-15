@@ -72,6 +72,8 @@ app.disable("x-powered-by");
 app.use(
   helmet({
     crossOriginResourcePolicy: false,
+    // "Continue with Google" opens a Google popup that must be able to report back to the page
+    crossOriginOpenerPolicy: { policy: "same-origin-allow-popups" },
     contentSecurityPolicy: false, // SPA + PhonePe redirect + Cloudinary media; set CSP at the CDN if required
   }),
 );

@@ -20,6 +20,7 @@ import { Redirect } from '../models/Redirect.js';
 import { Advertisement } from '../models/Advertisement.js';
 import { Setting } from '../models/Setting.js';
 import { User } from '../models/User.js';
+import { Order } from '../models/Order.js';
 import { PRODUCTS, CATEGORIES } from '../seed/data/catalogData.js';
 import { isValidGSTIN } from '../utils/helpers.js';
 
@@ -48,7 +49,7 @@ const run = async () => {
   // ───────── Catalogue ─────────
   section('Products & categories');
   const [products, categories] = await Promise.all([
-    Product.find().select('name slug sku status category subCategory images price stock').lean(),
+    Product.find().select('name slug sku status category subCategory images price stock manufacturerDetails ingredients').lean(),
     Category.find().select('name slug status parent').lean(),
   ]);
   const catById = new Map(categories.map((c) => [String(c._id), c]));
@@ -61,11 +62,11 @@ const run = async () => {
       `Catalogue products missing or not ACTIVE: ${missingSeed.map((p) => p.slug).join(', ')}`,
       'npm run catalog:add   (adds/updates them – keeps everything else)   or   npm run catalog:reset   (delete old + add)'
     );
-  } else ok('Royal Flora & Pimples Cream are in the database and active');
+  } else ok(`All ${PRODUCTS.length} catalogue products are in the database and active`);
 
   const missingCats = CATEGORIES.filter((sc) => !categories.some((c) => c.slug === sc.slug && c.status === 'ACTIVE'));
   if (missingCats.length) bad(`Catalogue categories missing or inactive: ${missingCats.map((c) => c.slug).join(', ')}`, 'npm run catalog:add');
-  else ok('Luxury Perfumes & Ayurvedic Skin Care categories are active');
+  else ok(`${CATEGORIES.map((c) => c.name).join(', ')} – active`);
 
   const extra = active.filter((p) => !PRODUCTS.some((sp) => sp.slug === p.slug));
   if (extra.length) warn(`${extra.length} other active product(s) still on the store: ${extra.map((p) => p.slug).slice(0, 8).join(', ')}`, 'npm run catalog:reset  (or delete them in Admin › Products)');
@@ -78,6 +79,8 @@ const run = async () => {
     for (const img of p.images || []) if (localImageMissing(img.url)) bad(`"${p.name}" image not found in frontend/public: ${img.url}`);
     if (!p.price) bad(`"${p.name}" has no price`);
     if (!p.stock) warn(`"${p.name}" is out of stock (stock 0)`, 'Admin › Inventory');
+    if (!String(p.manufacturerDetails || '').trim()) warn(`"${p.name}" has no manufacturer details (required on the listing by Legal Metrology rules)`, 'Admin › Products › edit › Details & Legal – copy “Mfd. by” from the pack');
+    if (!String(p.ingredients || '').replace(/<[^>]*>/g, '').trim()) warn(`"${p.name}" has no ingredient list`, 'Admin › Products › edit › Description › Ingredients – copy from the pack');
   }
 
   for (const c of categories.filter((x) => x.status === 'ACTIVE')) {
@@ -123,6 +126,14 @@ const run = async () => {
   if (!gstin) warn('GSTIN is empty – invoices are issued without GST', 'Admin › Settings › GST & Tax');
   else if (!isValidGSTIN(gstin)) bad(`GSTIN "${gstin}" is not a valid format`, 'Admin › Settings › GST & Tax');
   else ok(`GSTIN ${gstin} · ${s.invoice?.gstScheme || 'REGULAR'} scheme · prices ${s.invoice?.pricesIncludeTax === false ? 'EXCLUDE' : 'include'} GST`);
+  if (gstin && isValidGSTIN(gstin)) {
+    const stateCode = s.business?.stateCode || '';
+    if (stateCode && gstin.slice(0, 2) !== stateCode) bad(`GSTIN starts with ${gstin.slice(0, 2)} but business state "${s.business?.state}" is code ${stateCode}`, 'Admin › Settings › Business – fix the state');
+    if (s.invoice?.showGstinOnSite === false) warn('“Show GSTIN on the website” is OFF – footer and checkout will not show it', 'Admin › Settings › GST & Tax › turn it on › Save settings');
+    else ok(`Website shows: GSTIN ${gstin} (footer, checkout, contact page, Google business data)`);
+    const noGst = await Order.countDocuments({ 'invoice.number': { $exists: true }, 'invoice.creditNote.number': { $exists: false }, $or: [{ 'invoice.seller.gstin': { $in: ['', null] } }, { 'invoice.seller.gstin': { $exists: false } }] });
+    if (noGst) warn(`${noGst} invoice(s) were issued before the GSTIN was added – they print “GST: Unregistered”`, 'npm run invoices:gstin-preview  then  npm run invoices:gstin-fix');
+  }
   ok(`Shipping: ${s.shipping?.zoneRatesEnabled ? 'zone rates ON' : `flat ₹${s.flatShippingFee}`}, free above ₹${s.freeShippingThreshold}${s.shipping?.freeShippingEnabled === false ? ' (free shipping OFF)' : ''}`);
   if (!s.codEnabled && s.onlinePaymentEnabled === false) bad('Both COD and online payment are switched off – nobody can check out', 'Admin › Settings › Payments');
 
@@ -141,6 +152,8 @@ const run = async () => {
   if (!pp) warn('PhonePe keys not set – only Cash on Delivery works');
   else ok(`PhonePe keys set · PHONEPE_ENV=${process.env.PHONEPE_ENV || 'SANDBOX'}`);
   if (pp && !(process.env.PHONEPE_WEBHOOK_USERNAME && process.env.PHONEPE_WEBHOOK_PASSWORD)) warn('PhonePe webhook username/password not set', 'DEPLOY-VPS.md → Step 10b');
+  if (!process.env.FIREBASE_PROJECT_ID) warn('FIREBASE_PROJECT_ID not set – “Continue with Google” is switched off', 'Add the Firebase project ID to .env, then pm2 reload jayrup --update-env');
+  else ok(`Google sign-in: Firebase project ${process.env.FIREBASE_PROJECT_ID}`);
 
   console.log(`\n${problems ? `✖ ${problems} problem(s)` : '✓ No problems'}${warnings ? ` · ⚠ ${warnings} warning(s)` : ''}\n`);
   await mongoose.disconnect();

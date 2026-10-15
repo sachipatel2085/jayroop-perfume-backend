@@ -37,6 +37,20 @@ export const PRODUCT_TYPES = {
     // Alcohol-based perfumes are flammable: most couriers move them by surface only.
     hazmat: true,
   },
+  DEODORANT: {
+    label: 'Deodorant & body spray',
+    // 3307 20 00 – personal deodorants and anti-perspirants
+    hsnCode: '33072000',
+    hsnDescription: 'Personal deodorants & body sprays',
+    suggestedGstRate: 18,
+    googleCategory: 'Health & Beauty > Personal Care > Deodorant & Anti-Perspirant',
+    schemaCategory: 'Deodorant',
+    sections: ['fragrance', 'benefits', 'ingredients', 'howToUse', 'precautions'],
+    // Used sprays cannot be resold – only damaged, leaking or wrong items are returned.
+    defaultReturnable: false,
+    // Aerosol cans are pressurised & flammable: couriers move them by surface only.
+    hazmat: true,
+  },
   AYURVEDIC: {
     label: 'Ayurvedic medicine (external use)',
     // 3004 90 11 – medicaments of the Ayurvedic system, packed for retail sale
@@ -139,6 +153,7 @@ export const inferProductType = (product = {}, category = null) => {
   const byHsn = Object.entries(PRODUCT_TYPES).find(([, t]) => t.hsnCode && t.hsnCode === hsn);
   if (byHsn) return byHsn[0];
   const text = `${product.name || ''} ${category?.name || ''}`.toLowerCase();
+  if (/deodorant|body spray|deo spray/.test(text)) return 'DEODORANT';
   if (/perfume|parfum|attar|itr|fragrance|cologne|eau de|edp|edt|body mist/.test(text)) return 'FRAGRANCE';
   if (/ayurved|proprietary medicine/.test(text)) return 'AYURVEDIC';
   if (/cream|serum|face|skin|gel|lotion|pimple|acne|sunscreen/.test(text)) return 'SKINCARE';
