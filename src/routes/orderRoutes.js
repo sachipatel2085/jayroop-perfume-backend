@@ -18,6 +18,7 @@ import {
   getPrintOptions,
   taxPreview,
 } from '../controllers/orderController.js';
+import { bulkUpdateOrders, selectOrders, getQueues, lookupOrders, bulkDispatch } from '../controllers/orderBulkController.js';
 import { protect, authorize, optionalAuth } from '../middleware/authMiddleware.js';
 import { trackingLimiter } from '../middleware/rateLimiter.js';
 
@@ -34,6 +35,12 @@ router.post('/my-orders/:orderNumber/return-request', protect, requestReturn);
 router.get('/', ...admin, getAllOrders);
 router.get('/print/options', ...admin, getPrintOptions);
 router.post('/print', ...admin, bulkPrint);
+// Bulk order tools (status, ship, deliver, COD, invoices, returns, notes, courier sheet)
+router.post('/bulk', ...admin, bulkUpdateOrders);
+router.get('/bulk/select', ...admin, selectOrders);
+router.get('/bulk/queues', ...admin, getQueues);
+router.post('/bulk/lookup', ...admin, lookupOrders);
+router.post('/bulk/dispatch', ...admin, bulkDispatch);
 router.get('/admin/:id', ...admin, getAdminOrder);
 router.put('/:id/status', ...admin, updateOrderStatus);
 router.put('/:id/tracking', ...admin, updateOrderTracking);

@@ -253,7 +253,7 @@ const pendingRefundTotal = (order) =>
 /**
  * Cancel an order: restore stock, release coupon, raise credit note, auto-refund online payments.
  */
-export const cancelOrder = async (order, { reason = '', by = 'SYSTEM', refund = true, allowShipped = false } = {}) => {
+export const cancelOrder = async (order, { reason = '', by = 'SYSTEM', refund = true, allowShipped = false, notify = true } = {}) => {
   if (order.orderStatus === 'DELIVERED' || (order.orderStatus === 'SHIPPED' && !allowShipped)) {
     throw httpErr(400, 'Shipped orders cannot be cancelled. Please request a return after delivery.');
   }
@@ -288,7 +288,7 @@ export const cancelOrder = async (order, { reason = '', by = 'SYSTEM', refund = 
     }
   }
 
-  sendCancelledMail(order).catch(() => {});
+  if (notify) sendCancelledMail(order).catch(() => {});
   return order;
 };
 

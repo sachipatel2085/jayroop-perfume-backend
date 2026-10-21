@@ -8,7 +8,8 @@ import { renderInvoicePdf } from '../services/pdf/invoicePdf.js';
 import { renderShippingLabelPdf } from '../services/pdf/labelPdf.js';
 import { composeSheets, mergePdfs, PAPER_SIZES, PER_PAGE_OPTIONS } from '../services/pdf/printSheet.js';
 import { httpError } from '../services/pricingService.js';
-import { sendMail, sendShippedMail, sendDeliveredMail } from '../services/mailer.js';
+import { sendMail } from '../services/mailer.js';
+import { applyStatusChange, applyTracking, applyReturnDecision } from '../services/orderActions.js';
 import { ContactInquiry } from '../models/ContactInquiry.js';
 import { RETURN_WINDOW_DAYS, RETURN_REASONS } from '../config/productTypes.js';
 
@@ -19,22 +20,6 @@ const deliveredAtOf = (o) => {
 const returnWindowEnd = (o) => {
   const d = deliveredAtOf(o);
   return d ? new Date(d.getTime() + RETURN_WINDOW_DAYS * 86400000) : null;
-};
-
-// Courier tracking deep links
-const buildCourierTrackingUrl = (courier, trackingId) => {
-  if (!trackingId) return null;
-  const c = (courier || '').toLowerCase();
-  const id = encodeURIComponent(trackingId);
-  if (c.includes('bluedart')) return `https://www.bluedart.com/tracking?trackNumber=${id}`;
-  if (c.includes('delhivery')) return `https://www.delhivery.com/track/package/${id}`;
-  if (c.includes('dtdc')) return `https://www.dtdc.in/tracking/tracking_results.asp?trk_type=cn&strCnNo=${id}`;
-  if (c.includes('shiprocket')) return `https://shiprocket.co/tracking/${id}`;
-  if (c.includes('xpressbees')) return `https://www.xpressbees.com/shipment/tracking?awbNo=${id}`;
-  if (c.includes('ekart')) return `https://ekartlogistics.com/shipmenttrack/${id}`;
-  if (c.includes('ecom')) return `https://ecomexpress.in/tracking/?awb_field=${id}`;
-  if (c.includes('india post') || c.includes('speed post')) return 'https://www.indiapost.gov.in/_layouts/15/dop.portal.tracking/trackconsignment.aspx';
-  return null;
 };
 
 const isAdminUser = (user) => user && ['ADMIN', 'SUPER_ADMIN'].includes(user.role);
@@ -266,28 +251,9 @@ export const updateReturnRequest = async (req, res, next) => {
   try {
     const order = await Order.findById(req.params.id);
     if (!order) throw httpError(404, 'Order not found');
-    if (!order.returnRequest) throw httpError(400, 'This order has no return request.');
     const status = String(req.body.status || '').toUpperCase();
-    if (!['OPEN', 'APPROVED', 'REJECTED', 'CLOSED'].includes(status)) throw httpError(400, 'Invalid status');
-    order.returnRequest.status = status;
-    order.returnRequest.resolution = String(req.body.resolution || '').slice(0, 1000);
-    if (status !== 'OPEN') order.returnRequest.resolvedAt = new Date();
-    order.markModified('returnRequest');
-    order.statusHistory.push({
-      status: order.orderStatus,
-      timestamp: new Date(),
-      note: `Return request ${status.toLowerCase()}${order.returnRequest.resolution ? `: ${order.returnRequest.resolution}` : ''}`,
-      updatedBy: req.user.email,
-    });
-    await order.save();
+    await applyReturnDecision(order, { status, resolution: req.body.resolution, by: req.user.email, notify: req.body.notify !== false });
     await logAdminAction({ req, action: 'RETURN_REQUEST_UPDATED', resource: 'Order', resourceId: order._id.toString(), details: { status } });
-    if (order.customerEmail && status !== 'OPEN') {
-      sendMail({
-        to: order.customerEmail,
-        subject: `Update on your request – ${order.orderNumber}`,
-        html: `<p>Hi ${String(order.shippingAddress?.fullName || '').split(' ')[0] || 'there'},</p><p>Your return / replacement request for order <b>${order.orderNumber}</b> has been <b>${status.toLowerCase()}</b>.</p>${order.returnRequest.resolution ? `<p>${order.returnRequest.resolution.replace(/</g, '&lt;')}</p>` : ''}<p>— Team Jayrup · care@jayrup.in</p>`,
-      }).catch(() => {});
-    }
     res.status(200).json({ success: true, message: `Return request ${status.toLowerCase()}.`, data: order });
   } catch (error) {
     next(error);
@@ -487,30 +453,35 @@ export const taxPreview = async (req, res, next) => {
 // @desc    Admin: list orders with filters & pagination
 // @route   GET /api/v1/orders?status=&paymentMethod=&paymentStatus=&search=&from=&to=&page=&limit=
 // @access  Private/Admin
+export const buildOrderFilter = ({ status, paymentMethod, paymentStatus, search, from, to } = {}) => {
+  const filter = {};
+  if (status === 'RETURN_OPEN') filter['returnRequest.status'] = 'OPEN';
+  else if (status && ORDER_STATUSES.includes(status)) filter.orderStatus = status;
+  if (paymentMethod && ['ONLINE', 'COD'].includes(paymentMethod)) filter.paymentMethod = paymentMethod;
+  if (paymentStatus && typeof paymentStatus === 'string') filter.paymentStatus = paymentStatus;
+  if (from || to) {
+    const range = parseDateRange(from, to);
+    filter.createdAt = { $gte: range.from, $lte: range.to };
+  }
+  if (search && String(search).trim()) {
+    const rx = { $regex: escapeRegex(String(search).trim()), $options: 'i' };
+    filter.$or = [
+      { orderNumber: rx },
+      { trackingId: rx },
+      { 'invoice.number': rx },
+      { 'shippingAddress.fullName': rx },
+      { 'shippingAddress.phone': rx },
+      { customerEmail: rx },
+      { 'paymentInfo.transactionId': rx },
+    ];
+  }
+  return filter;
+};
+
 export const getAllOrders = async (req, res, next) => {
   try {
-    const { status, paymentMethod, paymentStatus, search, from, to, page = 1, limit = 20 } = req.query;
-    const filter = {};
-    if (status === 'RETURN_OPEN') filter['returnRequest.status'] = 'OPEN';
-    else if (status && ORDER_STATUSES.includes(status)) filter.orderStatus = status;
-    if (paymentMethod && ['ONLINE', 'COD'].includes(paymentMethod)) filter.paymentMethod = paymentMethod;
-    if (paymentStatus) filter.paymentStatus = paymentStatus;
-    if (from || to) {
-      const range = parseDateRange(from, to);
-      filter.createdAt = { $gte: range.from, $lte: range.to };
-    }
-    if (search) {
-      const rx = { $regex: escapeRegex(search.trim()), $options: 'i' };
-      filter.$or = [
-        { orderNumber: rx },
-        { trackingId: rx },
-        { 'invoice.number': rx },
-        { 'shippingAddress.fullName': rx },
-        { 'shippingAddress.phone': rx },
-        { customerEmail: rx },
-        { 'paymentInfo.transactionId': rx },
-      ];
-    }
+    const { page = 1, limit = 20 } = req.query;
+    const filter = buildOrderFilter(req.query);
 
     const lim = Math.min(100, Math.max(1, Number(limit) || 20));
     const pg = Math.max(1, Number(page) || 1);
@@ -547,83 +518,27 @@ export const getAdminOrder = async (req, res, next) => {
   }
 };
 
-const ALLOWED_TRANSITIONS = {
-  PENDING_PAYMENT: ['PAID', 'PROCESSING', 'CANCELLED'],
-  PAID: ['PROCESSING', 'SHIPPED', 'DELIVERED', 'CANCELLED', 'REFUND_REQUESTED'],
-  PROCESSING: ['SHIPPED', 'DELIVERED', 'CANCELLED', 'REFUND_REQUESTED'],
-  SHIPPED: ['DELIVERED', 'PROCESSING', 'CANCELLED', 'REFUND_REQUESTED'],
-  DELIVERED: ['REFUND_REQUESTED', 'SHIPPED'],
-  CANCELLED: [],
-  REFUND_REQUESTED: ['PROCESSING', 'SHIPPED', 'DELIVERED', 'CANCELLED'],
-  REFUNDED: [],
-};
-
 // @desc    Admin: update order status (validated transitions, stock & invoice side-effects)
-// @route   PUT /api/v1/orders/:id/status   { status, note, paymentStatus }
+// @route   PUT /api/v1/orders/:id/status   { status, note, paymentStatus, notify }
 // @access  Private/Admin
 export const updateOrderStatus = async (req, res, next) => {
   try {
     const { status, note, paymentStatus } = req.body;
-    let order = await Order.findById(req.params.id);
+    const order = await Order.findById(req.params.id);
     if (!order) throw httpError(404, 'Order not found');
+    const from = order.orderStatus;
+    const result = await applyStatusChange(order, { status, note, paymentStatus, by: req.user.email, notify: req.body.notify !== false });
 
-    if (!ORDER_STATUSES.includes(status)) throw httpError(400, `Invalid order status. Allowed: ${ORDER_STATUSES.join(', ')}`);
-    if (status === 'REFUNDED') throw httpError(400, 'Use the “Refund” action to refund an order (records the refund & credit note).');
-
-    const oldStatus = order.orderStatus;
-    if (status !== oldStatus && !ALLOWED_TRANSITIONS[oldStatus]?.includes(status)) {
-      throw httpError(400, `Cannot move an order from ${oldStatus} to ${status}.`);
-    }
-    if (status === 'PAID' && order.paymentMethod === 'ONLINE' && order.paymentStatus !== 'PAID') {
-      throw httpError(400, 'Online payments are confirmed by PhonePe. Use “Check payment status” instead.');
-    }
-
-    if (status === 'CANCELLED') {
-      order = await cancelOrder(order, {
-        reason: note || 'Cancelled by store',
-        by: req.user.email,
-        allowShipped: oldStatus === 'SHIPPED',
+    if (result.changed) {
+      await logAdminAction({
+        req,
+        action: 'ORDER_STATUS_UPDATED',
+        resource: 'Order',
+        resourceId: order._id.toString(),
+        details: { orderNumber: order.orderNumber, from, to: status, note },
       });
-    } else {
-      order.orderStatus = status;
-      if (paymentStatus && ['PENDING', 'PAID', 'FAILED'].includes(paymentStatus) && order.paymentMethod === 'COD') {
-        order.paymentStatus = paymentStatus;
-      }
-      if (status === 'DELIVERED') {
-        order.deliveredAt = new Date();
-        if (order.paymentMethod === 'COD') order.paymentStatus = 'PAID';
-      }
-      if (status === 'SHIPPED' && !order.shippedAt) order.shippedAt = new Date();
-
-      const settings = await Setting.getStoreSettings();
-      const autoOn = settings.invoice?.autoGenerateForCodOn || 'SHIPPED';
-      const shouldInvoice =
-        !order.invoice?.number &&
-        ((order.paymentStatus === 'PAID' && ['PROCESSING', 'SHIPPED', 'DELIVERED'].includes(status)) ||
-          (order.paymentMethod === 'COD' && ((autoOn === 'SHIPPED' && ['SHIPPED', 'DELIVERED'].includes(status)) || (autoOn === 'DELIVERED' && status === 'DELIVERED'))));
-      if (shouldInvoice) await issueInvoice(order, { settings });
-
-      order.statusHistory.push({
-        status,
-        timestamp: new Date(),
-        note: note || `Order status updated from ${oldStatus} to ${status}`,
-        updatedBy: req.user.email,
-      });
-      await order.save();
-
-      if (status === 'SHIPPED' && oldStatus !== 'SHIPPED') sendShippedMail(order).catch(() => {});
-      if (status === 'DELIVERED' && oldStatus !== 'DELIVERED') sendDeliveredMail(order).catch(() => {});
     }
-
-    await logAdminAction({
-      req,
-      action: 'ORDER_STATUS_UPDATED',
-      resource: 'Order',
-      resourceId: order._id.toString(),
-      details: { orderNumber: order.orderNumber, from: oldStatus, to: status, note },
-    });
-
-    res.status(200).json({ success: true, message: `Order status updated to ${status}`, data: order });
+    res.status(200).json({ success: true, message: result.changed ? `Order status updated to ${status}` : result.message, data: order });
   } catch (error) {
     next(error);
   }
@@ -637,33 +552,7 @@ export const updateOrderTracking = async (req, res, next) => {
     const { courier, trackingId, trackingUrl, note } = req.body;
     const order = await Order.findById(req.params.id);
     if (!order) throw httpError(404, 'Order not found');
-    if (!courier || !trackingId) throw httpError(400, 'Please provide both courier partner and tracking ID');
-    if (['CANCELLED', 'REFUNDED', 'PENDING_PAYMENT'].includes(order.orderStatus)) {
-      throw httpError(400, `Cannot dispatch an order that is ${order.orderStatus}.`);
-    }
-
-    order.courier = String(courier).trim().slice(0, 60);
-    order.trackingId = String(trackingId).trim().slice(0, 60);
-    order.trackingUrl = (trackingUrl && /^https?:\/\//.test(trackingUrl) ? trackingUrl : null) || buildCourierTrackingUrl(order.courier, order.trackingId);
-
-    const wasShipped = order.orderStatus === 'SHIPPED';
-    if (['PAID', 'PROCESSING'].includes(order.orderStatus)) {
-      order.orderStatus = 'SHIPPED';
-      order.shippedAt = new Date();
-    }
-
-    if (!order.invoice?.number && order.orderStatus === 'SHIPPED') {
-      await issueInvoice(order);
-    }
-
-    order.statusHistory.push({
-      status: order.orderStatus,
-      timestamp: new Date(),
-      note: note || `Dispatched via ${order.courier}. Tracking ID: ${order.trackingId}`,
-      updatedBy: req.user.email,
-    });
-    await order.save();
-    if (!wasShipped && order.orderStatus === 'SHIPPED') sendShippedMail(order).catch(() => {});
+    await applyTracking(order, { courier, trackingId, trackingUrl, note, by: req.user.email, notify: req.body.notify !== false });
 
     await logAdminAction({
       req,
