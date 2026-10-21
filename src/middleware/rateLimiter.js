@@ -12,6 +12,25 @@ export const apiLimiter = rateLimit({
   },
 });
 
+// Public catalogue reads (products, categories, blogs, reviews, store settings, ads, influencer videos).
+// Every storefront page view makes several of these – and so does Googlebot when it renders a page –
+// so they get a higher limit than the rest of the API. Only GET/HEAD; never admin sub-routes.
+const PUBLIC_READ = /^\/api\/v1\/(products|categories|blogs|reviews\/product|settings\/public|advertisements|influencers|seo)(\/|\?|$)/;
+const PRIVATE_READ = /^\/api\/v1\/(products\/admin|influencers\/admin|reviews\/admin)|\/mine(\?|$)/;
+export const isPublicCatalogRead = (req) =>
+  (req.method === 'GET' || req.method === 'HEAD') && PUBLIC_READ.test(req.originalUrl) && !PRIVATE_READ.test(req.originalUrl);
+
+export const publicReadLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 1500,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    success: false,
+    message: 'Too many requests from this IP, please try again in a few minutes.',
+  },
+});
+
 // Strict limiter for authentication routes (login / register / forgot password)
 export const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,

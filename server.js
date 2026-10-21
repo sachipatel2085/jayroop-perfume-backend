@@ -10,7 +10,7 @@ import mongoSanitize from "express-mongo-sanitize";
 import path from "path";
 import { fileURLToPath } from "url";
 import { connectDB } from "./src/config/db.js";
-import { apiLimiter } from "./src/middleware/rateLimiter.js";
+import { apiLimiter, publicReadLimiter, isPublicCatalogRead } from "./src/middleware/rateLimiter.js";
 import { notFound, errorHandler } from "./src/middleware/errorMiddleware.js";
 
 // Route imports
@@ -117,7 +117,15 @@ app.use(mongoSanitize());
 
 if (!isProd) app.use(morgan("dev"));
 
-app.use("/api", apiLimiter);
+// API JSON must never appear in Google results (crawlers may still READ the public catalogue – see robots.txt)
+app.use("/api", (req, res, next) => {
+  res.set("X-Robots-Tag", "noindex");
+  next();
+});
+// Public catalogue reads (also used by Googlebot while rendering pages) get a higher limit
+app.use("/api", (req, res, next) =>
+  isPublicCatalogRead(req) ? publicReadLimiter(req, res, next) : apiLimiter(req, res, next),
+);
 
 app.get("/api/v1/health", (req, res) => {
   res.status(200).json({

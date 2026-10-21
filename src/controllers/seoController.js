@@ -71,11 +71,55 @@ export const getSitemapXml = async (req, res, next) => {
   }
 };
 
-// @desc    robots.txt
+// Public, read-only API endpoints the storefront calls while a page renders.
+// Googlebot renders pages with JavaScript and obeys robots.txt for every API call it makes –
+// if these are blocked, product / category / blog pages render as "not found" for Google
+// (the page then shows noindex and is dropped from search). Keep this list in sync with the
+// GET calls in the frontend services.
+export const PUBLIC_API_PATHS = [
+  '/api/v1/products',
+  '/api/v1/categories',
+  '/api/v1/blogs',
+  '/api/v1/reviews/product/',
+  '/api/v1/settings/public',
+  '/api/v1/advertisements',
+  '/api/v1/influencers',
+  '/api/v1/seo/',
+];
+// Private routes that live underneath the public prefixes above (longest rule wins for Google)
+const PRIVATE_UNDER_PUBLIC = ['/api/v1/products/admin', '/api/v1/influencers/admin', '/api/v1/reviews/admin', '/api/v1/reviews/product/*/mine'];
+
+const isApiHost = (req) => {
+  const host = String(req.hostname || '').toLowerCase();
+  let site = '';
+  try {
+    site = new URL(siteUrl()).hostname.toLowerCase();
+  } catch {
+    site = '';
+  }
+  return host.startsWith('api.') || (site && host && host !== site && host !== `www.${site}` && host !== 'localhost');
+};
+
+// @desc    robots.txt (host-aware: storefront jayrup.in vs. API api.jayrup.in – same Node process)
 // @route   GET /robots.txt  |  GET /api/v1/seo/robots.txt
 export const getRobotsTxt = async (req, res) => {
   const base = siteUrl();
-  const robots = `# Jayrup – ${base}
+  const allowApi = PUBLIC_API_PATHS.map((p) => `Allow: ${p}`).join('\n');
+  const blockPrivate = PRIVATE_UNDER_PUBLIC.map((p) => `Disallow: ${p}`).join('\n');
+
+  const robots = isApiHost(req)
+    ? `# ${req.hostname} – JSON API for ${base}
+# Crawlers may read the public catalogue endpoints so storefront pages render completely.
+# API responses send "X-Robots-Tag: noindex", so they never show up in search results themselves.
+User-agent: *
+${allowApi}
+Allow: /uploads/
+${blockPrivate}
+Disallow: /
+
+Sitemap: ${base}/sitemap.xml
+`
+    : `# Jayrup – ${base}
 User-agent: *
 Allow: /
 Disallow: /admin
@@ -92,15 +136,17 @@ Disallow: /login
 Disallow: /register
 Disallow: /forgot-password
 Disallow: /reset-password/
-Disallow: /api/
 Disallow: /*?*sort=
 Disallow: /*?*page=
-Allow: /api/v1/seo/
+${allowApi}
+${blockPrivate}
+Disallow: /api/
 
 Sitemap: ${base}/sitemap.xml
 `;
   res.header('Content-Type', 'text/plain; charset=utf-8');
-  res.header('Cache-Control', 'public, max-age=86400');
+  res.header('Cache-Control', 'public, max-age=3600');
+  res.header('Vary', 'Host');
   return res.status(200).send(robots);
 };
 
